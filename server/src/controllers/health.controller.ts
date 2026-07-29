@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { pingDb } from "../config/db";
 import { pingRedis } from "../config/redis";
+import { env } from "../config/env";
 import pkg from "../../package.json";
 
 const startedAt = Date.now();
@@ -21,8 +22,10 @@ const startedAt = Date.now();
  *         description: A dependency is unhealthy.
  */
 export async function health(_req: Request, res: Response) {
-  const [db, redis] = await Promise.all([pingDb(), pingRedis()]);
-  const ok = db && redis;
+  // Redis is optional: only treated as a hard dependency when REDIS_URL is set.
+  const redisRequired = Boolean(env.REDIS_URL);
+  const [db, redis] = await Promise.all([pingDb(), redisRequired ? pingRedis() : Promise.resolve(null)]);
+  const ok = db && (!redisRequired || redis === true);
   res.status(ok ? 200 : 503).json({
     status: ok ? "ok" : "degraded",
     uptime: (Date.now() - startedAt) / 1000,
@@ -56,8 +59,9 @@ export function live(_req: Request, res: Response) {
  *       503: { description: not ready }
  */
 export async function ready(_req: Request, res: Response) {
-  const [db, redis] = await Promise.all([pingDb(), pingRedis()]);
-  const ok = db && redis;
+  const redisRequired = Boolean(env.REDIS_URL);
+  const [db, redis] = await Promise.all([pingDb(), redisRequired ? pingRedis() : Promise.resolve(null)]);
+  const ok = db && (!redisRequired || redis === true);
   res.status(ok ? 200 : 503).json({ status: ok ? "ready" : "not_ready", checks: { db, redis } });
 }
 

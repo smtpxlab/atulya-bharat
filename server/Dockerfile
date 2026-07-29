@@ -4,7 +4,7 @@ FROM node:20-alpine AS build
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN --mount=type=cache,target=/root/.npm,sharing=shared \
+RUN --mount=type=cache,target=/root/.npm \
     npm install --no-audit --no-fund
 
 COPY tsconfig.json ./
@@ -21,7 +21,7 @@ ENV PORT=8000
 RUN apk add --no-cache tini
 
 COPY package.json package-lock.json* ./
-RUN --mount=type=cache,target=/root/.npm,sharing=shared \
+RUN --mount=type=cache,target=/root/.npm \
     npm install --omit=dev --no-audit --no-fund
 
 COPY --from=build /app/dist ./dist

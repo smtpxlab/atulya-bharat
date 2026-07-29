@@ -58,4 +58,4 @@ ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "dist/index.js"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:${PORT}/api/v1/health || exit 1
+  CMD wget -qO- http://127.0.0.1:${PORT}/api/v1/live || exit 1
