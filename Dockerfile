@@ -3,7 +3,7 @@
 # and the Express API, then runs ONE process that serves both.
 
 # ---------- 1. Frontend build ----------
-FROM node:20-alpine AS client
+FROM node:22-alpine AS client
 WORKDIR /client
 
 COPY package.json package-lock.json* bun.lockb* ./
@@ -28,7 +28,7 @@ ENV VITE_BACKEND_ENABLED=$VITE_BACKEND_ENABLED \
 RUN npm run build
 
 # ---------- 2. Server build ----------
-FROM node:20-alpine AS server
+FROM node:22-alpine AS server
 WORKDIR /app
 COPY server/package.json server/package-lock.json* ./
 RUN npm install --no-audit --no-fund
@@ -37,7 +37,7 @@ COPY server/src ./src
 RUN npm run build
 
 # ---------- 3. Runtime ----------
-FROM node:20-alpine AS runtime
+FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8000
