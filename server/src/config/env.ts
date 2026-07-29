@@ -75,6 +75,10 @@ const schema = z.object({
   MAIL_FROM_NAME: z.string().default("Atulya Bharat Run"),
   SITE_URL: z.string().default("https://atulyabharatrun.com"),
 
+  // Single-service mode: serve the built SPA from this process.
+  SERVE_CLIENT: z.coerce.boolean().default(true),
+  CLIENT_DIST_DIR: z.string().default("client"),
+
   // Feature flags — keep background workers off until compatibility layer flips.
   ENABLE_SCHEDULER: z.coerce.boolean().default(false),
 });
