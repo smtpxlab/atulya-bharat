@@ -1,0 +1,22 @@
+graph TD
+    Browser[Browser]
+    Browser --> ViteApp[React 18 + Vite bundle]
+    ViteApp --> Router[React Router + Suspense]
+    Router --> Auth[AuthProvider Context]
+    Router --> RQ[QueryClient Provider]
+    Auth --> Roles[user_roles fetch]
+    RQ --> Hooks[Feature Hooks - Challenges only today]
+    Router --> DirectPages[Pages with direct Supabase - 8 pages]
+    Hooks --> Services[src services]
+    DirectPages --> SDK
+    Services --> SDK[supabase-js]
+    SDK --> PostgREST[PostgREST + RLS]
+    SDK --> EdgeFns[Edge Functions]
+    SDK --> Storage[Storage Buckets]
+    SDK --> AuthAPI[Supabase Auth]
+    PostgREST --> PG[(Postgres 15)]
+    EdgeFns --> PG
+    EdgeFns --> RZP[Razorpay API]
+    EdgeFns --> Strava[Strava API]
+    PG --> RPCs[SECURITY DEFINER RPCs]
+    PG --> Triggers[handle_new_user, bump_club_member_count]

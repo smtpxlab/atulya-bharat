@@ -1,0 +1,15 @@
+sequenceDiagram
+    participant U as User
+    participant UI as React SPA
+    participant AB as AuthBootstrap
+    participant SB as Supabase Auth
+    participant DB as Postgres (user_roles)
+    U->>UI: submit email/password
+    UI->>SB: signInWithPassword
+    SB-->>UI: session (JWT access + refresh)
+    SB-->>AB: onAuthStateChange(SIGNED_IN)
+    AB->>DB: select role from user_roles where user_id
+    DB-->>AB: [admin] | [user] | []
+    AB->>UI: dispatch sessionLoaded + rolesLoaded
+    UI->>UI: ProtectedRoute / AdminRoute allow render
+    Note over UI,DB: All subsequent reads hit PostgREST with JWT;<br/>RLS + has_role() enforce authorization server-side

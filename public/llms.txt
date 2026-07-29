@@ -1,0 +1,22 @@
+# Atulya Bharat Run
+
+> Virtual running, walking, and cycling challenges across India. Cover real distances and unlock cultural milestones from iconic Indian cities, join clubs, and earn rewards.
+
+Atulya Bharat Run is a virtual fitness platform for runners, walkers, and cyclists in India. Users register for distance-based challenges themed around Indian heritage cities, track activity via Strava or manual entry, and join or create running clubs.
+
+## Pages
+
+- [Home](/): Overview of featured virtual challenges, clubs, and how the platform works.
+- [Challenges](/challenges): Browse all active virtual running and cycling challenges across India.
+- [Clubs](/clubs): Directory of registered running and fitness clubs.
+- [Blog](/blog): Articles on running tips, event recaps, club stories, and fitness guides.
+- [Leaderboard](/leaderboard): Top participants across active challenges.
+- [Gallery](/gallery): Photos from challenges, events, and community meetups.
+- [About](/about): About Atulya Bharat Run — mission and team.
+- [Contact](/contact): Get in touch with the Atulya Bharat Run team.
+
+## Optional
+
+- [Privacy Policy](/privacy-policy)
+- [Terms & Conditions](/terms-and-conditions)
+- [Refund & Return Policy](/refund-return-policy)

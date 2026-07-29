@@ -1,0 +1,20 @@
+graph LR
+    U[User Browser] --> SPA[React 18 + Vite SPA]
+    SPA --> RQ[TanStack Query cache]
+    SPA --> RDX[Redux Toolkit auth/UI]
+    SPA --> SDK[supabase-js client]
+    SDK --> AUTH[Supabase Auth GoTrue]
+    SDK --> REST[PostgREST auto-API + RLS]
+    SDK --> RT[Realtime WebSocket postgres_changes]
+    SDK --> FN[Edge Functions Deno]
+    SDK --> ST[Storage Buckets]
+    REST --> PG[(PostgreSQL 15)]
+    RT --> PG
+    FN --> PG
+    ST --> PG
+    PG --> TRIG[Triggers + SECURITY DEFINER RPCs]
+    FN --> RZP[Razorpay API]
+    FN --> STV[Strava API]
+    FN --> SMTP[SMTP Provider]
+    STV -. webhook .-> FN
+    RZP -. webhook .-> FN

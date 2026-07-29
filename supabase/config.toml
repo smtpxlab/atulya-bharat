@@ -1,0 +1,13 @@
+project_id = "mmosldcqcitqielptdkz"
+
+[functions.strava-webhook]
+verify_jwt = false
+
+[functions.strava-config]
+verify_jwt = false
+
+[functions.contact-form]
+verify_jwt = false
+
+[functions.razorpay-webhook]
+verify_jwt = false

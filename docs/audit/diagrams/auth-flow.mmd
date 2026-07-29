@@ -1,0 +1,29 @@
+sequenceDiagram
+    participant U as User
+    participant L as Login / Signup page
+    participant SA as Supabase Auth
+    participant T as Trigger handle_new_user
+    participant DB as Postgres
+    participant AP as AuthProvider
+    participant G as Route Guard
+
+    U->>L: enter creds OR click Google
+    L->>SA: signInWithPassword / signUp / signInWithOAuth
+    SA-->>L: session + JWT
+    Note over SA,T: on signup only
+    SA->>T: AFTER INSERT on auth.users
+    T->>DB: INSERT profiles (id, full_name, ...)
+    T->>DB: INSERT user_roles (user_id, 'user')
+    SA-->>AP: onAuthStateChange(SIGNED_IN, session)
+    AP->>DB: SELECT role FROM user_roles WHERE user_id = $1
+    DB-->>AP: roles[]
+    AP->>AP: setUser, setRoles, monitoring.identify
+    U->>G: navigate to /dashboard or /admin
+    G->>AP: useAuth() user, roles, isAdmin
+    alt user missing
+        G-->>U: redirect /login
+    else not admin and AdminRoute
+        G-->>U: redirect / and toast
+    else allowed
+        G-->>U: render page
+    end

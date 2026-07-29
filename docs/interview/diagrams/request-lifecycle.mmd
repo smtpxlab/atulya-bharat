@@ -1,0 +1,18 @@
+flowchart LR
+    A[Page component] --> B[Feature hook useX]
+    B --> C[React Query queryFn]
+    C --> D[Service function]
+    D --> E[supabase-js: from/rpc/functions.invoke]
+    E --> F{JWT attached?}
+    F -- yes --> G[PostgREST]
+    F -- edge --> H[Edge Function]
+    G --> I[RLS policies + has_role]
+    I --> J[(Postgres)]
+    H --> J
+    J --> K[Triggers / RPCs]
+    K --> L[Response rows]
+    L --> D
+    D --> M[Domain type mapping]
+    M --> C
+    C --> N[Cache + placeholderData]
+    N --> A

@@ -1,0 +1,25 @@
+graph LR
+    subgraph Inputs
+        Manual[Dashboard manual log]
+        SyncBtn[Dashboard Sync Strava btn]
+        WH[Strava webhook]
+    end
+
+    Manual -->|insert activity_logs + update registrations + insert user_milestones| DB[(Postgres)]
+    SyncBtn --> ESync[edge strava-sync-manual]
+    WH --> EWebhook[edge strava-webhook]
+    ESync -->|insert activity_logs idempotent| DB
+    EWebhook -->|insert activity_logs idempotent| DB
+
+    DB --> RPC_LB[RPC challenge_leaderboard / global_leaderboard]
+    DB --> RPC_HOF[RPC hall_of_fame]
+    DB --> Reads[Page reads via service layer or direct supabase]
+
+    RPC_LB --> LBPage[/leaderboard/]
+    RPC_HOF --> Home[/]
+    Reads --> Dashboard[/dashboard/]
+    Reads --> CDetail[/challenges/:slug/]
+
+    Note["Non-atomic risk: Manual path performs 3 separate writes in JS"]:::risk
+    Manual --- Note
+    classDef risk fill:#fee,stroke:#c00,color:#900;

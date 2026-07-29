@@ -1,0 +1,22 @@
+sequenceDiagram
+    participant U as User
+    participant FE as Checkout Page
+    participant EF1 as create-razorpay-order
+    participant RZP as Razorpay
+    participant EF2 as verify-razorpay-payment
+    participant WH as razorpay-webhook
+    participant DB as Postgres
+    U->>FE: Confirm order (challenge + ticket + coupon)
+    FE->>EF1: {challengeId, ticketId, couponCode}
+    EF1->>DB: insert orders (status=created)
+    EF1->>RZP: create order (amount, currency)
+    RZP-->>EF1: razorpay_order_id
+    EF1-->>FE: {orderId, keyId}
+    FE->>RZP: open Checkout modal
+    RZP-->>FE: {payment_id, signature}
+    FE->>EF2: verify signature
+    EF2->>EF2: HMAC-SHA256 verify
+    EF2->>DB: update orders (paid) + insert registrations
+    EF2-->>FE: success -> redirect to /my-challenges/:id
+    RZP-->>WH: async webhook (idempotent safety net)
+    WH->>DB: reconcile if verify missed

@@ -1,0 +1,219 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =========================================================
+   Atulya Bharat Run — Cinematic India Design System
+   Saffron · Gold · Navy · Cream · Playfair Display × Inter
+   All colors in HSL.
+   ========================================================= */
+
+@layer base {
+  :root {
+    /* Surfaces */
+    --background: 33 100% 97%;        /* #FFF8F0 warm cream */
+    --foreground: 0 0% 10%;           /* #1A1A1A ink */
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 10%;
+
+    /* Brand */
+    --primary: 21 100% 55%;           /* #FF6B1A saffron */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 33 50% 96%;          /* warm cream tint */
+    --secondary-foreground: 224 56% 24%;
+
+    --muted: 33 50% 94%;
+    --muted-foreground: 0 0% 42%;
+
+    --accent: 224 56% 24%;            /* navy — used in text & section heads */
+    --accent-foreground: 0 0% 100%;
+
+    --gold: 36 91% 55%;               /* #F5A623 */
+    --gold-foreground: 0 0% 10%;
+
+    --surface: 224 56% 24%;           /* navy panel */
+    --surface-foreground: 33 100% 97%;
+
+    --navy: 224 56% 24%;
+    --navy-foreground: 0 0% 100%;
+
+    --success: 123 46% 34%;           /* #2E7D32 */
+    --success-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 33 36% 86%;             /* #E8DDD0 */
+    --input: 33 36% 86%;
+    --ring: 21 100% 55%;
+
+    --radius: 0.75rem;
+
+    /* Sidebar */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 0 0% 10%;
+    --sidebar-primary: 21 100% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 33 50% 94%;
+    --sidebar-accent-foreground: 0 0% 10%;
+    --sidebar-border: 33 36% 86%;
+    --sidebar-ring: 21 100% 55%;
+  }
+
+  .dark {
+    --background: 224 56% 10%;
+    --foreground: 0 0% 98%;
+    --card: 224 56% 14%;
+    --card-foreground: 0 0% 98%;
+    --popover: 224 56% 14%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 21 100% 55%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 224 40% 18%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 224 30% 20%;
+    --muted-foreground: 0 0% 70%;
+    --accent: 36 91% 55%;
+    --accent-foreground: 0 0% 10%;
+    --gold: 36 91% 55%;
+    --surface: 224 56% 14%;
+    --surface-foreground: 0 0% 98%;
+    --navy: 224 56% 24%;
+    --navy-foreground: 0 0% 100%;
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 224 30% 22%;
+    --input: 224 30% 22%;
+    --ring: 21 100% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  h1, h2, h3, h4, .font-display {
+    font-family: 'Playfair Display', Georgia, serif;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  h1 { @apply text-4xl md:text-5xl; line-height: 1.1; }
+  h2 { @apply text-3xl md:text-4xl; line-height: 1.15; }
+  h3 { @apply text-2xl; line-height: 1.2; }
+}
+
+@layer components {
+  .abr-container {
+    @apply mx-auto w-full max-w-[1280px] px-4 sm:px-6;
+  }
+
+  .section-y { @apply py-16 md:py-24; }
+
+  .prose-narrow { max-width: 65ch; }
+
+  .card-elevated {
+    @apply rounded-3xl bg-card shadow-card transition-all duration-300 ease-out;
+  }
+  .card-elevated:hover {
+    @apply -translate-y-1 shadow-card-hover;
+  }
+
+  .nav-overlay {
+    background: linear-gradient(
+      180deg,
+      rgba(0, 0, 0, 0.65) 0%,
+      rgba(0, 0, 0, 0.3) 60%,
+      transparent 100%
+    );
+  }
+  .text-shadow-nav {
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  }
+
+  /* Heritage card shell — apply alongside `group` in markup */
+  .heritage-card {
+    @apply relative overflow-hidden border border-border bg-card shadow-card transition-all duration-300 hover:-translate-y-1 hover:shadow-card-hover;
+  }
+
+  /* Eyebrow tracking */
+  .eyebrow {
+    @apply text-[10px] font-bold uppercase tracking-[0.2em];
+  }
+
+  /* Saffron primary CTA recipe */
+  .btn-saffron {
+    @apply inline-flex items-center justify-center rounded-sm bg-primary px-7 py-4 text-xs font-bold uppercase tracking-[0.18em] text-primary-foreground shadow-saffron transition-transform hover:-translate-y-0.5;
+  }
+  .btn-outline-navy {
+    @apply inline-flex items-center justify-center rounded-sm border-2 border-accent px-7 py-3 text-xs font-bold uppercase tracking-[0.2em] text-accent transition-colors hover:bg-accent hover:text-accent-foreground;
+  }
+  .btn-outline-white {
+    @apply inline-flex items-center justify-center rounded-sm border border-white/25 px-7 py-4 text-xs font-bold uppercase tracking-[0.18em] text-white transition-colors hover:bg-white/10;
+  }
+}
+
+@layer utilities {
+  .text-display-1 { font-size: clamp(2rem, 4vw, 2.5rem); line-height: 1.05; font-weight: 700; }
+  .text-display-2 { font-size: clamp(1.625rem, 3vw, 2rem); line-height: 1.1; font-weight: 700; }
+  .text-display-3 { font-size: 1.5rem; line-height: 1.2; font-weight: 700; }
+
+  .grad-warm {
+    background-image: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--gold)) 100%);
+  }
+  .grad-saffron {
+    background-image: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--gold)) 100%);
+  }
+  .grad-hero {
+    background-image: linear-gradient(135deg, hsl(var(--navy)) 0%, hsl(224 56% 14%) 60%, hsl(var(--primary)) 100%);
+  }
+  .grad-overlay {
+    background-image: linear-gradient(180deg, hsl(var(--navy) / 0.10) 0%, hsl(var(--navy) / 0.82) 100%);
+  }
+
+  /* Heritage jali lattice (gold diamonds on transparent) */
+  .bg-pattern-jali {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60'><g fill='none' stroke='%23F5A623' stroke-width='1' opacity='0.9'><path d='M30 0 L60 30 L30 60 L0 30 Z'/><path d='M30 12 L48 30 L30 48 L12 30 Z'/><circle cx='30' cy='30' r='2' fill='%23F5A623' stroke='none'/></g></svg>");
+    background-size: 60px 60px;
+  }
+}
+
+/* Motion keyframes */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes gold-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+@keyframes underline-draw {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+.animate-fade-up { animation: fade-up 0.5s ease-out both; }
+.animate-gold-pulse { animation: gold-pulse 2s ease-in-out infinite; }
+.animate-underline { animation: underline-draw 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; transform-origin: left; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

@@ -1,0 +1,22 @@
+export type Profile = {
+  id: string;
+  full_name: string | null;
+  username: string | null;
+  avatar_url: string | null;
+  mobile: string | null;
+  gender: string | null;
+  dob: string | null;
+  house_no: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  pincode: string | null;
+  bio: string | null;
+  shop_name?: string | null;
+  email?: string | null;
+  total_km_logged: number;
+  challenges_completed: number;
+  created_at: string;
+  updated_at?: string;
+};

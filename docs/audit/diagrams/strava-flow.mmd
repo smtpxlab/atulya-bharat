@@ -1,0 +1,33 @@
+sequenceDiagram
+    participant U as User
+    participant D as Dashboard
+    participant E0 as edge strava-config
+    participant SA as Strava OAuth
+    participant CB as StravaCallback page
+    participant E1 as edge strava-connect
+    participant E2 as edge strava-sync-manual
+    participant E3 as edge strava-webhook
+    participant DB as Postgres
+
+    U->>D: Connect Strava
+    D->>E0: GET client_id
+    E0-->>D: client_id
+    D->>SA: redirect authorize
+    SA-->>CB: redirect with code
+    CB->>E1: POST code
+    E1->>SA: exchange code for tokens
+    SA-->>E1: access_token, refresh_token, expires_at, athlete
+    E1->>DB: upsert strava_tokens (service role)
+    Note over D,E2: Manual sync path
+    U->>D: Sync Strava
+    D->>E2: POST (JWT)
+    E2->>DB: SELECT strava_tokens WHERE user_id
+    E2->>E2: ensureFreshToken (refresh if expires within 60s)
+    E2->>SA: GET /api/v3/athlete/activities
+    SA-->>E2: activities
+    loop per matching active registration
+        E2->>DB: INSERT activity_logs (idempotent by strava_activity_id)
+    end
+    Note over E3,DB: Webhook path - signature/verify_token check needs verification
+    SA-->>E3: POST activity event
+    E3->>DB: ingest similar to manual sync

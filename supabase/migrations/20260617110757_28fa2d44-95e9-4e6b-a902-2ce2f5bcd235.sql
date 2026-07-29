@@ -1,0 +1,2 @@
+ALTER TABLE public.challenge_tickets ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
+ALTER TABLE public.challenge_tickets ADD COLUMN IF NOT EXISTS sort_order int NOT NULL DEFAULT 0;

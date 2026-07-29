@@ -1,0 +1,24 @@
+sequenceDiagram
+    participant U as User
+    participant FE as Profile / Dashboard
+    participant SC as strava-connect
+    participant STV as Strava API
+    participant WH as strava-webhook
+    participant CRON as strava-cron-sync (every 15m)
+    participant DB as Postgres
+    U->>FE: Click "Connect Strava"
+    FE->>STV: OAuth authorize (redirect)
+    STV-->>FE: /auth/strava/callback?code
+    FE->>SC: exchange code
+    SC->>STV: token exchange
+    STV-->>SC: access + refresh tokens
+    SC->>DB: upsert strava_tokens
+    Note over STV,WH: New Activity uploaded to Strava
+    STV-->>WH: POST webhook (activity id)
+    WH->>STV: GET activity detail (refresh token if needed)
+    WH->>DB: insert activity_logs (idempotent on strava_id)
+    DB->>DB: trigger activity_logs_sync_registration_total
+    DB->>DB: recompute progress + user_milestones + certificate
+    DB-->>FE: Realtime postgres_changes push
+    FE->>FE: React Query invalidate + UI updates
+    CRON->>STV: safety-net poll for missed webhooks

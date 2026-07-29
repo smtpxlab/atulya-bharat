@@ -1,0 +1,32 @@
+sequenceDiagram
+    participant U as User
+    participant M as RegistrationModal
+    participant H as useRegisterChallenge
+    participant RS as registrationService
+    participant PS as paymentService
+    participant E1 as edge create-razorpay-order
+    participant DB as Postgres
+    participant RZP as Razorpay
+    participant E2 as edge verify-razorpay-payment
+
+    U->>M: pick ticket, submit
+    M->>H: mutate(args)
+    H->>RS: registerForChallenge(args)
+    RS->>PS: createRazorpayOrder
+    PS->>E1: POST challenge_id, ticket_id, JWT
+    E1->>E1: getClaims(jwt) -> userId
+    E1->>DB: SELECT price_inr FROM challenge_tickets
+    E1->>RZP: POST /v1/orders (server-trusted amount)
+    RZP-->>E1: order_id, amount, currency
+    E1->>DB: INSERT orders (status created)
+    E1-->>PS: order_id, key_id, amount
+    PS-->>RS: order
+    RS-->>M: open Razorpay Checkout
+    U->>RZP: pay via Checkout
+    RZP-->>M: razorpay_payment_id + signature
+    M->>PS: verifyRazorpayPayment(...)
+    PS->>E2: POST signature
+    E2->>E2: HMAC verify (needs audit)
+    E2->>DB: UPDATE orders SET status=paid
+    E2->>DB: INSERT registrations (status active)
+    Note over RZP,E2: MISSING - razorpay-webhook for async payment.failed / refund.processed
