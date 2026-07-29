@@ -12,7 +12,7 @@
  * consuming components (or add a re-export shim) rather than editing the
  * generated file.
  */
-import { supabase as realSupabase } from "@/integrations/supabase/client";
+import { supabase as realSupabase } from "../supabase/client";
 import { BACKEND_ENABLED } from "./config";
 import { createBackendClient } from "./client";
 
