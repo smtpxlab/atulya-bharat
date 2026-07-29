@@ -7,7 +7,8 @@ FROM node:20-alpine AS client
 WORKDIR /client
 
 COPY package.json package-lock.json* bun.lockb* ./
-RUN --mount=type=cache,target=/root/.npm,sharing=shared npm install --no-audit --no-fund
+RUN --mount=type=cache,id=npm-cache,target=/root/.npm,sharing=shared \
+    npm install --no-audit --no-fund
 
 COPY . .
 # Vite inlines VITE_* at build time — they must be Railway *build* variables.
@@ -17,7 +18,8 @@ ARG VITE_BACKEND_API_PREFIX=/api/v1
 ARG VITE_SUPABASE_URL=""
 ARG VITE_SUPABASE_PUBLISHABLE_KEY=""
 ARG VITE_SUPABASE_PROJECT_ID=""
-ENV VITE_BACKEND_ENABLED=$VITE_BACKEND_ENABLED \
+ENV \
+    VITE_BACKEND_ENABLED=$VITE_BACKEND_ENABLED \
     VITE_BACKEND_URL=$VITE_BACKEND_URL \
     VITE_BACKEND_API_PREFIX=$VITE_BACKEND_API_PREFIX \
     VITE_SUPABASE_URL=$VITE_SUPABASE_URL \
@@ -45,7 +47,8 @@ ENV CLIENT_DIST_DIR=client
 RUN apk add --no-cache tini
 
 COPY server/package.json server/package-lock.json* ./
-RUN --mount=type=cache,target=/root/.npm,sharing=shared npm install --omit=dev --no-audit --no-fund
+RUN --mount=type=cache,id=npm-cache,target=/root/.npm,sharing=shared \
+    npm install --omit=dev --no-audit --no-fund
 
 COPY --from=server /app/dist ./dist
 COPY server/knexfile.ts ./knexfile.ts
@@ -58,4 +61,4 @@ ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "dist/index.js"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:${PORT}/api/v1/health || exit 1
+CMD wget -q -O /dev/null http://127.0.0.1:${PORT}/api/v1/health || exit 1
