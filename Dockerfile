@@ -7,7 +7,7 @@ FROM node:20-alpine AS client
 WORKDIR /client
 
 COPY package.json package-lock.json* bun.lockb* ./
-RUN --mount=type=cache,id=cacheKey:npm,target=/root/.npm npm install --no-audit --no-fund
+RUN --mount=type=cache,target=/root/.npm npm install --no-audit --no-fund
 
 COPY . .
 # Vite inlines VITE_* at build time — they must be Railway *build* variables.
@@ -29,7 +29,7 @@ RUN npm run build
 FROM node:20-alpine AS server
 WORKDIR /app
 COPY server/package.json server/package-lock.json* ./
-RUN --mount=type=cache,id=cacheKey:npm,target=/root/.npm npm install --no-audit --no-fund
+RUN --mount=type=cache,target=/root/.npm npm install --no-audit --no-fund
 COPY server/tsconfig.json ./
 COPY server/src ./src
 RUN npm run build
@@ -45,7 +45,7 @@ ENV CLIENT_DIST_DIR=client
 RUN apk add --no-cache tini
 
 COPY server/package.json server/package-lock.json* ./
-RUN --mount=type=cache,id=cacheKey:npm,target=/root/.npm npm install --omit=dev --no-audit --no-fund
+RUN --mount=type=cache,target=/root/.npm npm install --omit=dev --no-audit --no-fund
 
 COPY --from=server /app/dist ./dist
 COPY server/knexfile.ts ./knexfile.ts
