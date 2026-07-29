@@ -7,7 +7,7 @@ FROM node:20-alpine AS client
 WORKDIR /client
 
 COPY package.json package-lock.json* bun.lockb* ./
-RUN npm install --no-audit --no-fund
+RUN npm install --legacy-peer-deps --no-audit --no-fund
 
 COPY . .
 # Vite inlines VITE_* at build time — they must be Railway *build* variables.
