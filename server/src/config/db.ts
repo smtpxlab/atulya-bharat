@@ -1,6 +1,15 @@
 import knex, { Knex } from "knex";
+import pg from "pg";
 import { env } from "./env";
 import { logger } from "./logger";
+
+/**
+ * node-postgres returns numeric/bigint as strings, while PostgREST (the API the
+ * React app was written against) returns them as JSON numbers. Parse them back
+ * to numbers so UI code doing arithmetic / `toFixed` keeps working.
+ */
+pg.types.setTypeParser(1700, (v: string) => (v === null ? null : Number(v))); // numeric
+pg.types.setTypeParser(20, (v: string) => (v === null ? null : Number(v))); // int8
 
 let instance: Knex | null = null;
 

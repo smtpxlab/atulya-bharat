@@ -148,19 +148,50 @@ function applyFilters(qb: Knex.QueryBuilder, query: Record<string, unknown>, kno
 }
 
 
-/** PostgREST-ish `or=(title.ilike.%x%,slug.ilike.%x%)` or bare comma list. */
+/**
+ * PostgREST-ish `or=(title.ilike.%x%,slug.ilike.%x%)` or bare comma list.
+ * Supports `col.is.null` / `col.not.is.null` too — the public challenge list
+ * uses `end_at.is.null,end_at.gte.<now>` and previously dropped every row with
+ * a blank end date because `is` was not a recognised operator here.
+ */
 function applyOr(qb: Knex.QueryBuilder, raw: string, known?: Set<string>) {
   const inner = raw.replace(/^\(/, "").replace(/\)$/, "");
   const parts = inner.split(",").filter(Boolean);
   qb.where((b: Knex.QueryBuilder) => {
     for (const part of parts) {
-      const [column, op, ...rest] = part.split(".");
-      const value = rest.join(".");
-      if (!IDENT.test(column ?? "")) continue;
-      if (known && known.size && !known.has(column!)) continue;
-      const sqlOp = OPS[op ?? ""];
+      const segs = part.split(".");
+      const column = segs.shift() ?? "";
+      let negate = false;
+      if (segs[0] === "not") {
+        negate = true;
+        segs.shift();
+      }
+      const op = segs.shift() ?? "";
+      const value = segs.join(".");
+      if (!IDENT.test(column)) continue;
+      if (known && known.size && !known.has(column)) continue;
+
+      if (op === "is") {
+        const v = coerce(value);
+        if (v === null) negate ? b.orWhereNotNull(column) : b.orWhereNull(column);
+        else negate ? b.orWhereNot(column, v as any) : b.orWhere(column, v as any);
+        continue;
+      }
+      if (op === "in") {
+        const list = value.replace(/^\(/, "").replace(/\)$/, "").split(",").map(coerce) as any[];
+        negate ? b.orWhereNotIn(column, list) : b.orWhereIn(column, list);
+        continue;
+      }
+      const sqlOp = OPS[op];
       if (!sqlOp) continue;
-      b.orWhere(column!, sqlOp, coerce(value) as any);
+      const v = coerce(value);
+      if (v === null) {
+        negate ? b.orWhereNotNull(column) : b.orWhereNull(column);
+      } else if (negate) {
+        b.orWhereNot(column, sqlOp, v as any);
+      } else {
+        b.orWhere(column, sqlOp, v as any);
+      }
     }
   });
 }
