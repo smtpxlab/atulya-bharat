@@ -222,15 +222,47 @@ export const updateChallenge = async (
 
   if (error) throw toServiceError(error, "Could not update challenge");
 
-  const { error: delErr } = await supabase
+  // Tickets are diffed instead of delete-all + re-insert: a ticket that is
+  // already referenced by a registration cannot be deleted (FK restrict).
+  const { data: existing, error: exErr } = await supabase
     .from("challenge_tickets")
-    .delete()
+    .select("id")
     .eq("challenge_id", id);
-  if (delErr) throw toServiceError(delErr, "Could not refresh tickets");
+  if (exErr) throw toServiceError(exErr, "Could not load tickets");
 
-  const ticketRows = toTicketRows(id, payload.tickets);
-  const { error: insErr } = await supabase.from("challenge_tickets").insert(ticketRows);
-  if (insErr) throw toServiceError(insErr, "Could not save tickets");
+  const existingIds = new Set((existing ?? []).map((r: any) => r.id as string));
+  const rows = toTicketRows(id, payload.tickets);
+
+  for (let i = 0; i < payload.tickets.length; i++) {
+    const ticketId = payload.tickets[i]?.id;
+    if (ticketId && existingIds.has(ticketId)) {
+      const { error: upErr } = await supabase
+        .from("challenge_tickets")
+        .update(rows[i])
+        .eq("id", ticketId);
+      if (upErr) throw toServiceError(upErr, "Could not save tickets");
+    } else {
+      const { error: insErr } = await supabase.from("challenge_tickets").insert(rows[i]);
+      if (insErr) throw toServiceError(insErr, "Could not save tickets");
+    }
+  }
+
+  const keep = new Set(
+    payload.tickets.map((t) => t.id).filter((v): v is string => Boolean(v)),
+  );
+  const removed = [...existingIds].filter((tid) => !keep.has(tid));
+  if (removed.length) {
+    const { error: delErr } = await supabase
+      .from("challenge_tickets")
+      .delete()
+      .in("id", removed);
+    if (delErr) {
+      throw toServiceError(
+        delErr,
+        "Could not remove a ticket — it already has bookings against it",
+      );
+    }
+  }
 
   return challengeFromRow(updated);
 };

@@ -62,7 +62,8 @@ router.get(
   asyncHandler(async (req, res) => {
     const rows = await getDb()("challenge_tickets")
       .where({ challenge_id: req.params.id })
-      .orderBy("price_inr", "asc");
+      .orderBy("sort_order", "asc")
+      .orderBy("created_at", "asc");
     res.json(ok(rows));
   }),
 );

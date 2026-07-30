@@ -312,12 +312,36 @@ function parseSelect(raw: string): { columns: string[]; embeds: Embed[] } {
   return { columns, embeds };
 }
 
-async function hydrateEmbeds(rows: any[], embeds: Embed[]) {
+async function hydrateEmbeds(parentTable: string, rows: any[], embeds: Embed[]) {
   if (!rows.length) return;
+  const parentCols = await tableColumns(parentTable);
   for (const embed of embeds) {
     if (!ALLOWED.has(embed.table) && embed.table !== "profiles") continue;
     const relCols = await tableColumns(embed.table);
     if (!relCols.size) continue;
+
+    // One-to-many (`challenges?select=...,challenge_tickets(ticket_price)`):
+    // the FK lives on the child table, so return an array per parent row.
+    const childKey = `${parentTable.replace(/s$/, "")}_id`;
+    if (!parentCols.has(embed.localKey) && relCols.has(childKey)) {
+      const ids = [...new Set(rows.map((r) => r.id).filter(Boolean))];
+      const cols = embed.columns.filter((c) => relCols.has(c));
+      if (!cols.includes(childKey)) cols.push(childKey);
+      const children = ids.length
+        ? await getDb()(embed.table)
+            .whereIn(childKey, ids as any[])
+            .select(cols.length ? cols : ["*"])
+        : [];
+      const grouped = new Map<string, any[]>();
+      for (const child of children as any[]) {
+        const key = child[childKey];
+        if (!grouped.has(key)) grouped.set(key, []);
+        grouped.get(key)!.push(child);
+      }
+      for (const r of rows) r[embed.alias] = grouped.get(r.id) ?? [];
+      continue;
+    }
+
     const localKey = embed.localKey;
     const ids = [...new Set(rows.map((r) => r[localKey]).filter(Boolean))];
     if (!ids.length) {
@@ -359,8 +383,12 @@ router.get(
       const cols = parsed.columns.filter((c) => known.has(c));
       select = cols.length ? cols : ["*"];
       for (const embed of embeds) {
-        if (known.has(embed.localKey) && select[0] !== "*" && !select.includes(embed.localKey)) {
+        if (select[0] === "*") continue;
+        if (known.has(embed.localKey) && !select.includes(embed.localKey)) {
           select.push(embed.localKey);
+        } else if (known.has("id") && !select.includes("id")) {
+          // one-to-many embed: the child rows are matched on the parent id
+          select.push("id");
         }
       }
     }
@@ -373,7 +401,7 @@ router.get(
     if (q.offset !== undefined) base.offset(Number(q.offset) || 0);
 
     const [rows, countRows] = await Promise.all([base, countQb]);
-    await hydrateEmbeds(rows as any[], embeds);
+    await hydrateEmbeds(table, rows as any[], embeds);
     const total = Number((countRows as any)?.[0]?.count ?? (rows as any[]).length);
     res.json({ data: rows, count: total });
   }),
@@ -428,8 +456,16 @@ router.delete(
       const scopeCol = USER_SCOPED[table] ?? SELF_WRITE[table];
       if (scopeCol && table !== "club_social_links") qb.where(scopeCol, req.user!.sub);
     }
-    const rows = await qb.del().returning("*");
-    res.json({ data: rows });
+    try {
+      const rows = await qb.del().returning("*");
+      res.json({ data: rows });
+    } catch (err: any) {
+      // 23503 = foreign_key_violation (row is still referenced elsewhere)
+      if (err?.code === "23503") {
+        throw HttpError.conflict(`Cannot delete from '${table}': the record is still in use`);
+      }
+      throw err;
+    }
   }),
 );
 
