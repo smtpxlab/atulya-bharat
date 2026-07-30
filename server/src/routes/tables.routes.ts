@@ -104,34 +104,48 @@ function applyFilters(qb: Knex.QueryBuilder, query: Record<string, unknown>) {
     if (RESERVED.has(key)) continue;
     const idx = key.lastIndexOf(".");
     if (idx <= 0) continue;
-    const column = key.slice(0, idx);
-    const op = key.slice(idx + 1);
+    let column = key.slice(0, idx);
+    let op = key.slice(idx + 1);
+    // Negated filters arrive as `col.not.<op>` (client `.not(col, op, value)`).
+    let negate = false;
+    if (column.endsWith(".not")) {
+      negate = true;
+      column = column.slice(0, -4);
+    }
     if (!IDENT.test(column)) continue;
     const value = String(rawValue);
 
     if (op === "in") {
-      qb.whereIn(column, value.split(",").map(coerce) as any[]);
+      const list = value.split(",").map(coerce) as any[];
+      if (negate) qb.whereNotIn(column, list);
+      else qb.whereIn(column, list);
       continue;
     }
     if (op === "is") {
       const v = coerce(value);
-      if (v === null) qb.whereNull(column);
-      else qb.where(column, v as any);
+      if (v === null) negate ? qb.whereNotNull(column) : qb.whereNull(column);
+      else negate ? qb.whereNot(column, v as any) : qb.where(column, v as any);
       continue;
     }
     if (op === "contains") {
       // array containment (tags)
-      qb.whereRaw("?? @> ?", [column, value.split(",")]);
+      if (negate) qb.whereRaw("not (?? @> ?)", [column, value.split(",")]);
+      else qb.whereRaw("?? @> ?", [column, value.split(",")]);
       continue;
     }
     const sqlOp = OPS[op];
     if (!sqlOp) continue;
     const v = coerce(value);
-    if (v === null) qb.whereNull(column);
-    else if (sqlOp === "ilike" || sqlOp === "like") qb.where(column, sqlOp, v as any);
-    else qb.where(column, sqlOp, v as any);
+    if (v === null) {
+      negate ? qb.whereNotNull(column) : qb.whereNull(column);
+    } else if (negate) {
+      qb.whereNot(column, sqlOp, v as any);
+    } else {
+      qb.where(column, sqlOp, v as any);
+    }
   }
 }
+
 
 /** PostgREST-ish `or=(title.ilike.%x%,slug.ilike.%x%)` or bare comma list. */
 function applyOr(qb: Knex.QueryBuilder, raw: string) {
@@ -168,10 +182,18 @@ function scopeForRead(table: string, req: any, qb: Knex.QueryBuilder) {
   if (!PUBLIC_READ.has(table)) throw HttpError.forbidden("Insufficient role");
 }
 
+/** Tables any signed-in user may write, as long as the row is their own. */
+const SELF_WRITE: Record<string, string> = {
+  clubs: "created_by",
+  club_members: "user_id",
+  club_social_links: "club_id",
+};
+
 function assertWrite(table: string, req: any, body: any) {
   if (isAdmin(req.user?.roles)) return;
-  const scopeCol = USER_SCOPED[table];
+  const scopeCol = USER_SCOPED[table] ?? SELF_WRITE[table];
   if (!scopeCol || table === "user_roles") throw HttpError.forbidden("Insufficient role");
+  if (table === "club_social_links") return; // ownership enforced by the club row itself
   const rows = Array.isArray(body) ? body : [body];
   for (const row of rows) {
     if (row && row[scopeCol] && row[scopeCol] !== req.user.sub) {
@@ -241,8 +263,8 @@ router.patch(
     const qb = getDb()(table);
     applyFilters(qb, req.query as Record<string, unknown>);
     if (!isAdmin(req.user?.roles)) {
-      const scopeCol = USER_SCOPED[table];
-      if (scopeCol) qb.where(scopeCol, req.user!.sub);
+      const scopeCol = USER_SCOPED[table] ?? SELF_WRITE[table];
+      if (scopeCol && table !== "club_social_links") qb.where(scopeCol, req.user!.sub);
     }
     const rows = await qb.update(req.body).returning("*");
     res.json({ data: rows });
@@ -259,8 +281,8 @@ router.delete(
     const qb = getDb()(table);
     applyFilters(qb, req.query as Record<string, unknown>);
     if (!isAdmin(req.user?.roles)) {
-      const scopeCol = USER_SCOPED[table];
-      if (scopeCol) qb.where(scopeCol, req.user!.sub);
+      const scopeCol = USER_SCOPED[table] ?? SELF_WRITE[table];
+      if (scopeCol && table !== "club_social_links") qb.where(scopeCol, req.user!.sub);
     }
     const rows = await qb.del().returning("*");
     res.json({ data: rows });

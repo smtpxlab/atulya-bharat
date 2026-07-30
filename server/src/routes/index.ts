@@ -23,6 +23,7 @@ import storageRoutes from "./storage.routes";
 import paymentsRoutes from "./payments.routes";
 import stravaRoutes from "./strava.routes";
 import tablesRoutes from "./tables.routes";
+import rpcRoutes from "./rpc.routes";
 import { sanitizeResponse } from "../middleware/sanitizeResponse";
 
 const router = Router();
@@ -55,5 +56,7 @@ router.use("/payments", paymentsRoutes);
 router.use("/strava", stravaRoutes);
 // Generic PostgREST-compatible fallback used by the Supabase-shaped client shim.
 router.use("/tables", tablesRoutes);
+// Postgres function calls issued by the shim as supabase.rpc(...).
+router.use("/rpc", rpcRoutes);
 
 export default router;

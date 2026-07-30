@@ -60,6 +60,8 @@ export function createFromBuilder(table: string) {
       in(column: string, values: unknown[]) { state.filters.push({ op: "in", column, value: values }); return build(state); },
       is(column: string, value: unknown) { state.filters.push({ op: "is", column, value }); return build(state); },
       contains(column: string, value: unknown) { state.filters.push({ op: "contains", column, value }); return build(state); },
+      not(column: string, op: string, value: unknown) { state.filters.push({ op: `not.${op}`, column, value }); return build(state); },
+      filter(column: string, op: string, value: unknown) { state.filters.push({ op, column, value }); return build(state); },
       or(expr: string) { state.filters.push({ op: "__or", column: "", value: expr }); return build(state); },
       order(column: string, opts: { ascending?: boolean } = {}) {
         state.order = { column, ascending: opts.ascending ?? true };
