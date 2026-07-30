@@ -132,9 +132,15 @@ export function createFromBuilder(table: string) {
           : rows;
       return { data: out, error: null, count: (data && data.count) ?? null, status: 200 };
     } catch (err: any) {
+      // Return a real Error so UI code doing `String(error)` / `error.message`
+      // shows something readable instead of "[object Object]".
+      const error = Object.assign(new Error(err?.message ?? "Unknown error"), {
+        status: err?.status,
+        details: err?.payload,
+      });
       return {
         data: null,
-        error: { message: err?.message ?? "Unknown error", status: err?.status, details: err?.payload },
+        error,
         count: null,
         status: err?.status ?? 500,
       };

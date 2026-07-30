@@ -99,7 +99,7 @@ const coerce = (raw: string): unknown => {
   return raw;
 };
 
-function applyFilters(qb: Knex.QueryBuilder, query: Record<string, unknown>) {
+function applyFilters(qb: Knex.QueryBuilder, query: Record<string, unknown>, known?: Set<string>) {
   for (const [key, rawValue] of Object.entries(query)) {
     if (RESERVED.has(key)) continue;
     const idx = key.lastIndexOf(".");
@@ -113,6 +113,7 @@ function applyFilters(qb: Knex.QueryBuilder, query: Record<string, unknown>) {
       column = column.slice(0, -4);
     }
     if (!IDENT.test(column)) continue;
+    if (known && known.size && !known.has(column)) continue;
     const value = String(rawValue);
 
     if (op === "in") {
@@ -148,17 +149,18 @@ function applyFilters(qb: Knex.QueryBuilder, query: Record<string, unknown>) {
 
 
 /** PostgREST-ish `or=(title.ilike.%x%,slug.ilike.%x%)` or bare comma list. */
-function applyOr(qb: Knex.QueryBuilder, raw: string) {
+function applyOr(qb: Knex.QueryBuilder, raw: string, known?: Set<string>) {
   const inner = raw.replace(/^\(/, "").replace(/\)$/, "");
   const parts = inner.split(",").filter(Boolean);
-  qb.where((b) => {
+  qb.where((b: Knex.QueryBuilder) => {
     for (const part of parts) {
       const [column, op, ...rest] = part.split(".");
       const value = rest.join(".");
       if (!IDENT.test(column ?? "")) continue;
+      if (known && known.size && !known.has(column!)) continue;
       const sqlOp = OPS[op ?? ""];
       if (!sqlOp) continue;
-      b.orWhere(column, sqlOp, coerce(value) as any);
+      b.orWhere(column!, sqlOp, coerce(value) as any);
     }
   });
 }
@@ -202,7 +204,104 @@ function assertWrite(table: string, req: any, body: any) {
   }
 }
 
+/** Drop payload keys that do not exist as columns (schema drift tolerance). */
+function pickKnown(body: any, known: Set<string>) {
+  if (!body || typeof body !== "object" || !known.size) return body;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(body)) if (known.has(k)) out[k] = v;
+  return out;
+}
+
 const router = Router();
+
+/**
+ * The Railway database does not always carry every column the React app's
+ * generated Supabase types expect (schema drift between the old hosted
+ * project and the self-hosted dump). Selecting a missing column makes
+ * Postgres throw, which surfaced as a blanket 500 on /admin/clubs. Introspect
+ * the real columns once per table and quietly ignore unknown ones.
+ */
+const columnCache = new Map<string, Set<string>>();
+async function tableColumns(table: string): Promise<Set<string>> {
+  const cached = columnCache.get(table);
+  if (cached) return cached;
+  const result: any = await getDb().raw(
+    "select column_name from information_schema.columns where table_schema = 'public' and table_name = ?",
+    [table],
+  );
+  const cols = new Set<string>(
+    ((result.rows ?? result) as any[]).map((r) => r.column_name as string),
+  );
+  columnCache.set(table, cols);
+  return cols;
+}
+
+/** `alias:related_table!clubs_promoter_id_fkey(id, full_name)` */
+type Embed = { alias: string; table: string; localKey: string; columns: string[] };
+
+function parseSelect(raw: string): { columns: string[]; embeds: Embed[] } {
+  const columns: string[] = [];
+  const embeds: Embed[] = [];
+  let depth = 0;
+  let buf = "";
+  const parts: string[] = [];
+  for (const ch of raw) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (ch === "," && depth === 0) {
+      parts.push(buf);
+      buf = "";
+      continue;
+    }
+    buf += ch;
+  }
+  if (buf.trim()) parts.push(buf);
+
+  for (const part of parts.map((p) => p.trim()).filter(Boolean)) {
+    const m = part.match(/^(?:([a-z0-9_]+)\s*:\s*)?([a-z0-9_]+)(?:!([a-z0-9_]+))?\s*\(([^)]*)\)$/i);
+    if (m) {
+      const [, alias, relTable, fk, inner] = m;
+      const cols = inner
+        .split(",")
+        .map((c) => c.trim())
+        .filter((c) => IDENT.test(c));
+      // Derive the local FK column: `clubs_promoter_id_fkey` → `promoter_id`.
+      let localKey = "";
+      if (fk) {
+        const stripped = fk.replace(/_fkey$/, "");
+        const idx = stripped.indexOf("_");
+        localKey = idx >= 0 ? stripped.slice(idx + 1) : stripped;
+      }
+      if (!localKey) localKey = `${relTable.replace(/s$/, "")}_id`;
+      embeds.push({ alias: alias || relTable, table: relTable, localKey, columns: cols });
+      continue;
+    }
+    if (IDENT.test(part)) columns.push(part);
+  }
+  return { columns, embeds };
+}
+
+async function hydrateEmbeds(rows: any[], embeds: Embed[]) {
+  if (!rows.length) return;
+  for (const embed of embeds) {
+    if (!ALLOWED.has(embed.table) && embed.table !== "profiles") continue;
+    const relCols = await tableColumns(embed.table);
+    if (!relCols.size) continue;
+    const localKey = embed.localKey;
+    const ids = [...new Set(rows.map((r) => r[localKey]).filter(Boolean))];
+    if (!ids.length) {
+      for (const r of rows) r[embed.alias] = null;
+      continue;
+    }
+    const cols = embed.columns.filter((c) => relCols.has(c));
+    if (!cols.includes("id") && relCols.has("id")) cols.push("id");
+    const related = await getDb()(embed.table)
+      .whereIn("id", ids as any[])
+      .select(cols.length ? cols : ["*"]);
+    const byId = new Map(related.map((r: any) => [r.id, r]));
+    for (const r of rows) r[embed.alias] = byId.get(r[localKey]) ?? null;
+  }
+}
 
 router.get(
   "/:table",
@@ -213,29 +312,37 @@ router.get(
     const q = req.query as Record<string, unknown>;
 
     const db = getDb();
+    const known = await tableColumns(table);
     const base = db(table);
-    applyFilters(base, q);
-    if (typeof q.or === "string") applyOr(base, q.or);
+    applyFilters(base, q, known);
+    if (typeof q.or === "string") applyOr(base, q.or, known);
     scopeForRead(table, req, base);
 
     const countQb = base.clone().clearSelect().clearOrder().count<{ count: string }[]>("* as count");
 
-    const select =
-      typeof q.select === "string" && q.select !== "*"
-        ? q.select
-            .split(",")
-            .map((c) => c.trim())
-            .filter((c) => IDENT.test(c))
-        : ["*"];
-    base.select(select.length ? select : ["*"]);
+    let embeds: Embed[] = [];
+    let select: string[] = ["*"];
+    if (typeof q.select === "string" && q.select !== "*") {
+      const parsed = parseSelect(q.select);
+      embeds = parsed.embeds;
+      const cols = parsed.columns.filter((c) => known.has(c));
+      select = cols.length ? cols : ["*"];
+      for (const embed of embeds) {
+        if (known.has(embed.localKey) && select[0] !== "*" && !select.includes(embed.localKey)) {
+          select.push(embed.localKey);
+        }
+      }
+    }
+    base.select(select);
 
-    if (typeof q.order === "string" && IDENT.test(q.order)) {
+    if (typeof q.order === "string" && IDENT.test(q.order) && known.has(q.order)) {
       base.orderBy(q.order, q.direction === "desc" ? "desc" : "asc");
     }
     if (q.limit !== undefined) base.limit(Math.min(Number(q.limit) || 20, 1000));
     if (q.offset !== undefined) base.offset(Number(q.offset) || 0);
 
     const [rows, countRows] = await Promise.all([base, countQb]);
+    await hydrateEmbeds(rows as any[], embeds);
     const total = Number((countRows as any)?.[0]?.count ?? (rows as any[]).length);
     res.json({ data: rows, count: total });
   }),
@@ -248,7 +355,11 @@ router.post(
     const table = req.params.table;
     assertTable(table);
     assertWrite(table, req, req.body);
-    const rows = await getDb()(table).insert(req.body).returning("*");
+    const known = await tableColumns(table);
+    const payload = Array.isArray(req.body)
+      ? req.body.map((r: any) => pickKnown(r, known))
+      : pickKnown(req.body, known);
+    const rows = await getDb()(table).insert(payload).returning("*");
     res.status(201).json({ data: Array.isArray(req.body) ? rows : rows[0] });
   }),
 );
@@ -260,13 +371,14 @@ router.patch(
     const table = req.params.table;
     assertTable(table);
     assertWrite(table, req, req.body);
+    const known = await tableColumns(table);
     const qb = getDb()(table);
-    applyFilters(qb, req.query as Record<string, unknown>);
+    applyFilters(qb, req.query as Record<string, unknown>, known);
     if (!isAdmin(req.user?.roles)) {
       const scopeCol = USER_SCOPED[table] ?? SELF_WRITE[table];
       if (scopeCol && table !== "club_social_links") qb.where(scopeCol, req.user!.sub);
     }
-    const rows = await qb.update(req.body).returning("*");
+    const rows = await qb.update(pickKnown(req.body, known)).returning("*");
     res.json({ data: rows });
   }),
 );
@@ -278,8 +390,9 @@ router.delete(
     const table = req.params.table;
     assertTable(table);
     assertWrite(table, req, {});
+    const known = await tableColumns(table);
     const qb = getDb()(table);
-    applyFilters(qb, req.query as Record<string, unknown>);
+    applyFilters(qb, req.query as Record<string, unknown>, known);
     if (!isAdmin(req.user?.roles)) {
       const scopeCol = USER_SCOPED[table] ?? SELF_WRITE[table];
       if (scopeCol && table !== "club_social_links") qb.where(scopeCol, req.user!.sub);
