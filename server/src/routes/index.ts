@@ -22,6 +22,7 @@ import contactRoutes from "./contact.routes";
 import storageRoutes from "./storage.routes";
 import paymentsRoutes from "./payments.routes";
 import stravaRoutes from "./strava.routes";
+import tablesRoutes from "./tables.routes";
 import { sanitizeResponse } from "../middleware/sanitizeResponse";
 
 const router = Router();
@@ -52,5 +53,7 @@ router.use("/contact", contactRoutes);
 router.use("/storage", storageRoutes);
 router.use("/payments", paymentsRoutes);
 router.use("/strava", stravaRoutes);
+// Generic PostgREST-compatible fallback used by the Supabase-shaped client shim.
+router.use("/tables", tablesRoutes);
 
 export default router;
