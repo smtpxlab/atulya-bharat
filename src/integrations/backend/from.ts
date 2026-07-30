@@ -95,9 +95,18 @@ export function createFromBuilder(table: string) {
         query[`${f.column}.${f.op}`] = Array.isArray(f.value) ? f.value.join(",") : String(f.value);
       }
 
-      const path = `/tables/${state.table}${
-        state.method === "PATCH" || state.method === "DELETE" ? "" : ""
-      }`;
+      // The Express backend exposes dedicated REST routes rather than a
+      // generic PostgREST-style table endpoint for a few tables. `user_roles`
+      // matters most: AuthBootstrap reads it right after sign-in, and the
+      // admin-gated list route would 403 before any role is known
+      // (chicken-and-egg → isAdmin false → /admin bounces to /dashboard).
+      const isSelfRoleQuery =
+        state.table === "user_roles" &&
+        state.method === "GET" &&
+        state.filters.some((f) => f.op === "eq" && f.column === "user_id");
+
+      const path = isSelfRoleQuery ? "/user-roles/me" : `/tables/${state.table}`;
+
 
       const data = await request<any>({
         method: state.method,

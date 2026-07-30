@@ -6,8 +6,19 @@
 export const BACKEND_ENABLED =
   String(import.meta.env.VITE_BACKEND_ENABLED ?? "false").toLowerCase() === "true";
 
+const RAW_BACKEND_URL = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.trim();
+
+/**
+ * Empty / missing VITE_BACKEND_URL means "same origin" (single-service deploy).
+ * Falling back to "" would make `new URL(path, "")` throw
+ * "Failed to construct 'URL': Invalid base URL".
+ */
 export const BACKEND_URL =
-  (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? "http://localhost:8080";
+  RAW_BACKEND_URL && RAW_BACKEND_URL.length > 0
+    ? RAW_BACKEND_URL.replace(/\/+$/, "")
+    : typeof window !== "undefined"
+    ? window.location.origin
+    : "http://localhost:8080";
 
 export const BACKEND_API_PREFIX =
   (import.meta.env.VITE_BACKEND_API_PREFIX as string | undefined) ?? "/api/v1";

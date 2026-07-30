@@ -2,7 +2,9 @@ import { Router } from "express";
 import { z } from "zod";
 import { getDb } from "../config/db";
 import { requireAuth } from "../middleware/auth";
-import { APP_ROLES, requireRole } from "../middleware/requireRole";
+import { APP_ROLES, isAdmin, requireRole } from "../middleware/requireRole";
+import { HttpError } from "../utils/httpError";
+
 import { validate } from "../middleware/validate";
 import { asyncHandler } from "../utils/asyncHandler";
 import { ok } from "../utils/list";
@@ -26,14 +28,18 @@ router.get(
 router.get(
   "/",
   requireAuth,
-  requireRole("admin"),
   asyncHandler(async (req, res) => {
     const userId = (req.query.user_id as string | undefined) ?? undefined;
+    // Anyone may read their own roles; listing other users' roles is admin-only.
+    if (userId !== req.user!.sub && !isAdmin(req.user!.roles)) {
+      throw HttpError.forbidden("Insufficient role");
+    }
     const qb = getDb()("user_roles").select("*");
     if (userId) qb.where({ user_id: userId });
     res.json(ok(await qb));
   }),
 );
+
 
 router.post(
   "/",
