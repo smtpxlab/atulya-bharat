@@ -14,6 +14,30 @@ import { globalRateLimiter } from "./middleware/rateLimit";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import routes from "./routes";
 
+/**
+ * Origins always allowed in addition to CORS_ORIGINS, so API calls can be
+ * tested from the FlutterFlow builder. Patterns support a `*` wildcard label.
+ */
+const EXTRA_ALLOWED_ORIGIN_PATTERNS = [
+  "https://app.flutterflow.io",
+  "https://*.flutterflow.io",
+  "https://flutterflow.io",
+];
+
+function originMatches(pattern: string, origin: string) {
+  if (!pattern.includes("*")) return pattern === origin;
+  const rx = new RegExp(
+    `^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^./]+")}$`,
+  );
+  return rx.test(origin);
+}
+
+export function isOriginAllowed(origin: string) {
+  const allowAll = !corsOrigins.length || corsOrigins.includes("*");
+  if (allowAll) return true;
+  return [...corsOrigins, ...EXTRA_ALLOWED_ORIGIN_PATTERNS].some((p) => originMatches(p, origin));
+}
+
 export function createApp() {
   const app = express();
 
@@ -24,10 +48,14 @@ export function createApp() {
   app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
   app.use(
     cors({
-      origin: corsOrigins.length && !corsOrigins.includes("*") ? corsOrigins : true,
+      // No Origin header (server-to-server, curl) is allowed through.
+      origin: (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) =>
+        cb(null, !origin || isOriginAllowed(origin)),
+
       credentials: true,
     }),
   );
+
   app.use(compression());
   app.use(express.json({ limit: "2mb" }));
   app.use(express.urlencoded({ extended: true, limit: "2mb" }));
