@@ -7,24 +7,36 @@ import { validate } from "../middleware/validate";
 import { asyncHandler } from "../utils/asyncHandler";
 import { HttpError } from "../utils/httpError";
 import { listQuerySchema, paginate, ok } from "../utils/list";
+import {
+  challengeLeaderboard,
+  challengeProgress,
+} from "../services/challenges/progress.service";
+
 
 const TABLE = "challenges";
 const router = Router();
 
 const challengeInput = z.object({
-  title: z.string().min(1),
+  name: z.string().min(1),
   slug: z.string().min(1),
-  city: z.string().nullable().optional(),
-  state: z.string().nullable().optional(),
-  total_distance_km: z.number().positive(),
-  description_short: z.string().nullable().optional(),
-  description_long: z.string().nullable().optional(),
-  cover_image_url: z.string().url().nullable().optional(),
-  activity_modes: z.array(z.string()).default([]),
-  is_featured: z.boolean().optional(),
-  is_new: z.boolean().optional(),
-  is_active: z.boolean().optional(),
-  sort_order: z.number().int().optional(),
+  distance: z.number().positive(),
+  challenge_type: z.string().min(1).optional(),
+  category: z.string().min(1).optional(),
+  description: z.string().nullable().optional(),
+  cover_image_url: z.string().nullable().optional(),
+  creative_image_url: z.string().nullable().optional(),
+  about_map_image_url: z.string().nullable().optional(),
+  route_map_image_url: z.string().nullable().optional(),
+  certificate_image_url: z.string().nullable().optional(),
+  bib_image_url: z.string().nullable().optional(),
+  max_duration_days: z.number().int().nullable().optional(),
+  start_at: z.string().nullable().optional(),
+  end_at: z.string().nullable().optional(),
+  status: z.boolean().optional(),
+  tags: z.array(z.string()).optional(),
+  meta_title: z.string().nullable().optional(),
+  meta_description: z.string().nullable().optional(),
+  meta_keywords: z.array(z.string()).optional(),
 });
 
 // Public list
@@ -34,14 +46,15 @@ router.get(
   validate(listQuerySchema, "query"),
   asyncHandler(async (req, res) => {
     const { q, page, pageSize, status } = req.query as unknown as z.infer<typeof listQuerySchema>;
-    const qb = getDb()(TABLE).select("*").orderBy("sort_order", "asc");
-    if (q) qb.whereILike("title", `%${q}%`);
-    if (status === "published") qb.where({ is_active: true });
-    if (status === "draft") qb.where({ is_active: false });
-    else if (!req.user) qb.where({ is_active: true });
+    const qb = getDb()(TABLE).select("*").orderBy("created_at", "desc");
+    if (q) qb.whereILike("name", `%${q}%`);
+    if (status === "published") qb.where({ status: true });
+    else if (status === "draft") qb.where({ status: false });
+    else if (!req.user) qb.where({ status: true });
     res.json(ok(await paginate(qb, page, pageSize)));
   }),
 );
+
 
 router.get(
   "/:idOrSlug",
@@ -73,11 +86,8 @@ router.get(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const limit = Math.min(Number(req.query.limit ?? 100), 500);
-    const rows = await getDb().raw("select * from public.challenge_leaderboard(?, ?)", [
-      req.params.id,
-      limit,
-    ]);
-    res.json(ok(rows.rows ?? rows));
+    const offset = Math.max(Number(req.query.offset ?? 0), 0);
+    res.json(ok(await challengeLeaderboard(req.params.id, limit, offset)));
   }),
 );
 
@@ -85,13 +95,10 @@ router.get(
   "/:id/progress",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const rows = await getDb().raw("select * from public.challenge_progress(?, ?)", [
-      req.params.id,
-      req.user!.sub,
-    ]);
-    res.json(ok((rows.rows ?? rows)[0] ?? null));
+    res.json(ok(await challengeProgress(req.user!.sub, req.params.id)));
   }),
 );
+
 
 // Admin CRUD
 router.post(

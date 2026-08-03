@@ -7,6 +7,11 @@ import { validate } from "../middleware/validate";
 import { asyncHandler } from "../utils/asyncHandler";
 import { HttpError } from "../utils/httpError";
 import { listQuerySchema, paginate, ok } from "../utils/list";
+import {
+  activeRegistration,
+  progressByRegistration,
+} from "../services/challenges/progress.service";
+
 
 const TABLE = "registrations";
 const router = Router();
@@ -24,7 +29,7 @@ router.get(
   validate(listQuerySchema, "query"),
   asyncHandler(async (req, res) => {
     const { page, pageSize, status } = req.query as unknown as z.infer<typeof listQuerySchema>;
-    const qb = getDb()(TABLE).where({ user_id: req.user!.sub }).orderBy("created_at", "desc");
+    const qb = getDb()(TABLE).where({ user_id: req.user!.sub }).orderBy("registered_at", "desc");
     if (status) qb.andWhere({ status });
     res.json(ok(await paginate(qb, page, pageSize)));
   }),
@@ -34,15 +39,29 @@ router.get(
   "/active",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const rows = await getDb().raw("select * from public.active_registration(?)", [req.user!.sub]);
-    res.json(ok((rows.rows ?? rows)[0] ?? null));
+    res.json(ok(await activeRegistration(req.user!.sub)));
   }),
 );
+
+router.get(
+  "/:id/progress",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const row = await progressByRegistration(req.params.id);
+    if (!row) throw HttpError.notFound();
+    if (row.user_id !== req.user!.sub && !(req.user!.roles ?? []).includes("admin"))
+      throw HttpError.forbidden();
+    res.json(ok(row));
+  }),
+);
+
 
 router.get(
   "/:id",
   requireAuth,
   asyncHandler(async (req, res) => {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(req.params.id))
+      throw HttpError.notFound();
     const row = await getDb()(TABLE).where({ id: req.params.id }).first();
     if (!row) throw HttpError.notFound();
     if (row.user_id !== req.user!.sub && !(req.user!.roles ?? []).includes("admin"))
@@ -85,7 +104,7 @@ router.get(
   validate(listQuerySchema, "query"),
   asyncHandler(async (req, res) => {
     const { page, pageSize, status } = req.query as unknown as z.infer<typeof listQuerySchema>;
-    const qb = getDb()(TABLE).select("*").orderBy("created_at", "desc");
+    const qb = getDb()(TABLE).select("*").orderBy("registered_at", "desc");
     if (status) qb.where({ status });
     res.json(ok(await paginate(qb, page, pageSize)));
   }),

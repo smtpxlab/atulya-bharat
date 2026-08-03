@@ -9,6 +9,33 @@ import { HttpError } from "../utils/httpError";
 import { listQuerySchema, paginate, ok } from "../utils/list";
 
 const TABLE = "clubs";
+/** Railway databases restored from the schema dump may not contain the public
+ *  helper functions. Fall back to plain SQL when the function is missing. */
+const MISSING_FN = new Set(["42883", "42P01"]);
+const CLUB_PUBLIC_COLS = [
+  "id","slug","name","club_type","description","logo_url","banner_url","promoter_id",
+  "promoter_name","promoter_city","promoter_state","promoter_description","established_at",
+  "discount_challenge_percent","discount_cart_percent","social_links","tags","is_public",
+  "status","priority","member_count","category_id","created_by","created_at","updated_at",
+  "meta_title","meta_description","meta_keywords",
+];
+async function publicClubs(slug?: string) {
+  try {
+    const result = slug
+      ? await getDb().raw("select * from public.get_public_club_by_slug(?)", [slug])
+      : await getDb().raw("select * from public.list_public_clubs()");
+    return (result as any).rows ?? result;
+  } catch (err: any) {
+    if (!MISSING_FN.has(err?.code)) throw err;
+    const qb = getDb()("clubs").select(CLUB_PUBLIC_COLS);
+    if (slug) return qb.where({ slug }).limit(1);
+    return qb
+      .where({ is_public: true, status: "approved" })
+      .orderBy("priority", "desc")
+      .orderBy("created_at", "desc");
+  }
+}
+
 const router = Router();
 
 const clubInput = z.object({
@@ -44,8 +71,8 @@ router.get(
       const qb = getDb()(TABLE).select("*").orderBy("priority", "desc").orderBy("created_at", "desc");
       return res.json(ok(await paginate(qb, page, pageSize)));
     }
-    const result = await getDb().raw("select * from public.list_public_clubs()");
-    res.json(ok({ items: result.rows ?? result, page: 1, pageSize: (result.rows ?? result).length, total: (result.rows ?? result).length }));
+    const rows = (await publicClubs()) as unknown[];
+    res.json(ok({ items: rows, page: 1, pageSize: rows.length, total: rows.length }));
   }),
 );
 
@@ -53,10 +80,8 @@ router.get(
   "/slug/:slug",
   optionalAuth,
   asyncHandler(async (req, res) => {
-    const result = await getDb().raw("select * from public.get_public_club_by_slug(?)", [
-      req.params.slug,
-    ]);
-    const row = (result.rows ?? result)[0];
+    const rows = (await publicClubs(req.params.slug)) as any[];
+    const row = rows[0];
     if (!row) throw HttpError.notFound();
     res.json(ok(row));
   }),
@@ -147,7 +172,30 @@ router.get(
   "/:id/members",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const result = await getDb().raw("select * from public.list_club_members(?)", [req.params.id]);
+    let result: any;
+    try {
+      result = await getDb().raw("select * from public.list_club_members(?)", [req.params.id]);
+    } catch (err: any) {
+      if (!MISSING_FN.has(err?.code)) throw err;
+      const rows = await getDb()("club_members as cm")
+        .leftJoin("profiles as p", "p.id", "cm.user_id")
+        .where("cm.club_id", req.params.id)
+        .orderBy("cm.joined_at", "asc")
+        .select(
+          "cm.id as membership_id",
+          "cm.user_id",
+          "cm.role",
+          "cm.joined_at",
+          getDb().raw("(cm.role = 'owner') as is_owner"),
+          "p.full_name",
+          "p.avatar_url",
+          "p.city",
+          getDb().raw("0::int as activities_count"),
+          getDb().raw("coalesce(p.total_km_logged, 0) as total_distance_km"),
+          getDb().raw("coalesce(p.challenges_completed, 0) as challenges_completed"),
+        );
+      result = { rows };
+    }
     res.json(ok({ items: result.rows ?? result }));
   }),
 );

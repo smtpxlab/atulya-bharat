@@ -4,6 +4,14 @@ import { optionalAuth } from "../middleware/auth";
 import { isAdmin } from "../middleware/requireRole";
 import { asyncHandler } from "../utils/asyncHandler";
 import { HttpError } from "../utils/httpError";
+import {
+  activeRegistration,
+  challengeLeaderboard,
+  challengeProgress,
+  logManualActivity,
+  progressByRegistration,
+} from "../services/challenges/progress.service";
+
 
 /**
  * PostgREST-compatible RPC endpoint.
@@ -109,6 +117,60 @@ const FALLBACKS: Record<string, (args: any) => Promise<unknown>> = {
       ),
 };
 
+/**
+ * Native Express implementations (Priority 1). These bypass Postgres functions
+ * entirely — identity comes from the authenticated request, never auth.uid().
+ */
+const NATIVE: Record<
+  string,
+  (args: any, userId: string | undefined, roles: string[] | undefined) => Promise<unknown>
+> = {
+  active_registration: async (_args, userId) => {
+    if (!userId) throw HttpError.unauthorized();
+    // Always scoped to the caller — a supplied _user_id argument is ignored.
+    const row = await activeRegistration(userId);
+    return row ? [row] : [];
+  },
+
+  challenge_progress: async (args, userId) => {
+    const uid = String(args._user_id ?? args.user_id ?? userId ?? "");
+    const challengeId = String(args._challenge_id ?? args.challenge_id ?? "");
+    if (!uid || !challengeId) throw HttpError.badRequest("user and challenge are required");
+    const row = await challengeProgress(uid, challengeId);
+    return row ? [row] : [];
+  },
+  challenge_progress_by_registration: async (args, userId, userRoles) => {
+    if (!userId) throw HttpError.unauthorized();
+    const regId = String(args._registration_id ?? args.registration_id ?? "");
+    if (!regId) throw HttpError.badRequest("registration_id is required");
+    const row = await progressByRegistration(regId);
+    if (!row) return [];
+    if (row.user_id !== userId && !isAdmin(userRoles)) throw HttpError.forbidden();
+    return [row];
+  },
+  challenge_leaderboard: async (args) => {
+    const challengeId = String(args._challenge_id ?? args.challenge_id ?? "");
+    if (!challengeId) throw HttpError.badRequest("challenge_id is required");
+    return challengeLeaderboard(
+      challengeId,
+      Math.min(Number(args._limit ?? args.limit ?? 20), 500),
+      Math.max(Number(args._offset ?? args.offset ?? 0), 0),
+    );
+  },
+  log_manual_activity: async (args, userId) => {
+    if (!userId) throw HttpError.unauthorized();
+    return logManualActivity(userId, {
+      registration_id: String(args._registration_id ?? args.registration_id ?? ""),
+      distance_km: Number(args._distance_km ?? args.distance_km),
+      activity_date: String(args._activity_date ?? args.activity_date ?? ""),
+      activity_type: String(args._activity_type ?? args.activity_type ?? ""),
+      notes: (args._notes ?? args.notes ?? null) as string | null,
+    });
+  },
+};
+
+
+
 const router = Router();
 
 router.post(
@@ -124,9 +186,16 @@ router.post(
     }
 
     const args = (req.body ?? {}) as Record<string, unknown>;
+
+    const native = NATIVE[fn];
+    if (native) {
+      return res.json(await native(args, req.user?.sub, req.user?.roles));
+    }
+
     const names = Object.keys(args).filter((k) => IDENT.test(k));
     const placeholders = names.map((n) => `${n} := ?`).join(", ");
     const values = names.map((n) => args[n] as never);
+
 
     try {
       const result = await getDb().raw(

@@ -7,6 +7,8 @@ import { validate } from "../middleware/validate";
 import { asyncHandler } from "../utils/asyncHandler";
 import { HttpError } from "../utils/httpError";
 import { listQuerySchema, paginate, ok } from "../utils/list";
+import { logManualActivity } from "../services/challenges/progress.service";
+
 
 const TABLE = "activity_logs";
 const router = Router();
@@ -39,13 +41,18 @@ router.post(
   validate(logInput),
   asyncHandler(async (req, res) => {
     const { registration_id, activity_date, activity_type, distance_km, notes } = req.body;
-    const result = await getDb().raw(
-      "select * from public.log_manual_activity(?, ?, ?, ?, ?, ?)",
-      [req.user!.sub, registration_id, activity_date, activity_type, distance_km, notes ?? null],
-    );
-    res.status(201).json(ok((result.rows ?? result)[0] ?? null));
+    if (!registration_id) throw HttpError.badRequest("registration_id is required");
+    const result = await logManualActivity(req.user!.sub, {
+      registration_id,
+      distance_km,
+      activity_date,
+      activity_type,
+      notes: notes ?? null,
+    });
+    res.status(201).json(ok(result));
   }),
 );
+
 
 router.delete(
   "/:id",
