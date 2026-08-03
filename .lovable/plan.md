@@ -1,85 +1,69 @@
-# Replace Lovable Cloud Auth with Custom Auth
+# Mobile auth variant + Mobile App Specification (Railway build)
 
-Decisions locked in: **Backend B data first, auth last** · **forced password reset at cutover** · **in-memory access token + HTTP-only refresh cookie** · **Railway (Postgres + Express + Redis)**.
+Three parts: (1) a code change adding a mobile-friendly token transport to the existing auth API, (2) redeploy of the Railway service from this build and live verification of the API, (3) the mobile app specification document describing the Railway custom Express API + Postgres as the single API contract.
 
-No UI, route, layout, form, or workflow changes anywhere. All work is in `server/`, `src/integrations/`, and the auth bootstrap — plus one *new* admin screen (IAM), which is additive.
+## Verified current state
 
----
+- `atulyabharatrun.xlab.website` serves the Lovable-hosted React bundle (`/api/v1/live` returns `index.html`), so Lovable Cloud is still the live production backend; Railway (`abrsite-production.up.railway.app`, `/api/v1/live` → `{"status":"alive"}`) runs in parallel.
+- Railway's Postgres contains imported content data (`/api/v1/blogs` returns real rows), but the Railway deployment runs older server code: `/api/v1/challenges` returns 500 and `/api/v1/rpc/*` returns "Route not found".
+- Custom-auth password hashes were never migrated; only the manually bootstrapped admin exists, so a forced reset for real users is still outstanding.
 
-## Why it's staged
+The specification will document the Railway custom API only. Anything that currently exists solely on Lovable Cloud is listed as a pre-launch migration item, not as an API surface.
 
-Supabase RLS is the live authorization engine and only trusts GoTrue JWTs. If the token issuer changes while the frontend still calls Supabase directly, every read becomes anonymous and RLS denies it. So Backend B has to be serving data *before* the issuer changes. Stage A makes Express the data path while GoTrue still issues tokens; Stage B swaps the issuer with no data-path change.
 
----
+## Part 1 — Mobile auth variant (code change)
 
-## Stage A — Backend B becomes the data layer (GoTrue still issues tokens)
+Goal: a native client can authenticate without a cookie jar or CSRF cookie, while the web flow is byte-for-byte unchanged.
 
-**A1. Provision Railway.** Postgres, Redis, and the Express service from `server/Dockerfile`. Health check green at a public URL.
+Behaviour when a request sends `X-Client-Type: mobile`:
 
-**A2. Migrate schema.** The raw dump is authoritative. Fold it into a Knex `schema_import` migration: all 28 tables, 8 enums, sequences, indexes, the 51 functions and 30 triggers. Strip `auth.*` references, RLS policies, and `auth.uid()` — functions that took it get an explicit `_user_id` argument (the Phase 4 rule). Keep `user_roles`, `has_role`, `is_admin`, `is_super_admin` intact.
+- `POST /api/v1/auth/login` (and `/register`) — no `Set-Cookie` for the refresh token and no CSRF cookie; the JSON body carries `refreshToken` (plus `accessToken`, `user`, `sessionId`, expiry).
+- `POST /api/v1/auth/refresh` — reads the refresh token from the JSON request body, returns the rotated `refreshToken` in the JSON body, sets no cookies.
+- `POST /api/v1/auth/logout` — accepts the refresh token in the body (already supported) and skips cookie clearing.
+- Requests without the header keep the existing HTTP-only cookie + CSRF double-submit behaviour exactly as today.
 
-**A3. Migrate data.** Export every public table from Cloud and load into Railway preserving **all existing UUIDs** — profiles, orders, registrations, payments, clubs, challenges, notifications, blog authors, activity logs. Row-count and FK-integrity verification per table before proceeding.
+Files touched (server only):
 
-**A4. Port the 86 RLS policies into Express.** The one genuinely large piece of work. A policy engine module keyed by the six archetypes already identified (admin full CRUD, owner-only, public read, club-membership, service-only, self-write). Applied per route as middleware, not ad hoc per handler, so coverage is auditable. Backend B is ~60% scaffolded here; the gaps are consistent role enforcement, club-membership checks, and secret-field stripping (`sanitizeResponse` already covers the last one).
+- `server/src/controllers/auth.controller.ts` — the existing `respondWithSession` already special-cases `X-Client-Type: native`; generalise it to treat `mobile` and `native` as the same "token in body" mode, and skip `setRefreshCookie` / `issueCsrfToken` entirely in that mode. Apply the same skip to `clearRefreshCookie` in `logout`, `resetPassword`, `changePassword`, `revokeAllSessions`.
+- `server/src/validators/auth.schemas.ts` — make `refreshToken` required when the mobile header is present (clear 400 instead of a confusing 401).
+- `server/src/middleware/csrf.ts` — no change needed: it already exempts requests that carry no `abr_rt` cookie. Verify with a test rather than assuming.
+- `server/src/utils/authCookies.ts` — `readRefreshToken` already falls back to `req.body.refreshToken`; add a small helper `isTokenTransportClient(req)` so header detection lives in one place.
 
-**A5. Temporary GoTrue verifier.** Express validates incoming Supabase JWTs against the project JWKS and maps `sub` → user id. Explicitly throwaway, deleted in B4. This is the only moment two systems touch, and only one of them issues tokens.
+Rotation and reuse detection: `authService.refresh` verifies the JWT, looks the session up by SHA-256 token hash, revokes the whole family on an unknown or already-revoked hash (`reuse_detected`, with an audit-log entry), then revokes the presented session as `rotated` and issues a new one. This logic is keyed on the token value and the `refresh_sessions` table, not on the transport, so it applies unchanged to the mobile variant. The plan adds tests that prove it: replaying a mobile refresh token twice must return 401 and revoke the family.
 
-**A6. Storage + integrations.** Point storage at R2 with the 8 preserved bucket names; migrate existing objects. Razorpay webhook and Strava callback URLs repointed to Railway; BullMQ jobs (Strava sync, registration expiry) running.
+Tests (`server/src/tests/auth.routes.test.ts` and a new mobile-transport test): mobile login returns `refreshToken` in the body and sets no `abr_rt` cookie; web login still sets the cookie and omits the body token; mobile refresh with a body token rotates and returns a new token; replayed mobile token → 401; mobile mutations succeed without any CSRF header.
 
-**A7. Flip `VITE_BACKEND_ENABLED=true`.** All 54 frontend files keep their `supabase.from(...)` calls unchanged — the compat shim routes them to Express. Full regression pass: every public page, dashboard, checkout, Strava flow, and all 16 admin modules.
+## Part 2 — Redeploy Railway and verify the live API
 
-**Exit gate:** app fully functional on Railway data, Supabase used *only* for issuing tokens.
+Before any endpoint is written into the spec it must be confirmed against the live Railway service:
 
----
+1. You redeploy `abrsite-production.up.railway.app` from this build (picks up the challenges/tickets fixes, the `/rpc/*` routes, the generic `/tables` embed handling, and the Part 1 mobile auth transport).
+2. I then probe each documented endpoint over HTTPS — public routes directly, authenticated routes with a mobile-transport login using an admin/test account you nominate — and record the real request/response shapes.
+3. Anything still failing (e.g. `/api/v1/challenges` 500) is diagnosed and fixed in `server/` before it reaches the document. Endpoints that cannot be made to respond are marked explicitly as "not available on Railway yet" rather than documented from source alone.
 
-## Stage B — Custom auth replaces GoTrue
+## Part 3 — Specification document
 
-**B1. Identity import.** Populate `app_users` from the existing profiles/users set: same UUIDs, same emails, `password_hash = NULL`, `email_verified_at` carried over. `user_roles` untouched — the five roles and hierarchy stay exactly as-is.
+One new document: `docs/mobile/MOBILE_APP_SPECIFICATION.md`, plus small companion diagrams under `docs/mobile/diagrams/` (auth flow, data flow, payment flow, Strava flow).
 
-**B2. Complete the auth surface.** Backend B already has register/login/refresh/logout/forgot/reset/verify. Add: change-password, list/revoke active sessions, login history, device tracking. New tables: `login_attempts`, `user_devices`, `audit_logs`.
 
-**B3. Security hardening.** Argon2id (already in place), refresh-token rotation with reuse detection and family revocation, account lockout on the existing `failed_login_count`/`locked_until` columns, per-IP and per-account rate limiting backed by Redis, audit logging on every auth and role event, secret sanitization (done).
 
-**B4. Cookie transport + CSRF.** Refresh token in an HTTP-only, `Secure`, `SameSite=None` cookie scoped to the API origin; access token held in memory only. Double-submit CSRF token on all state-changing requests. CORS configured for the exact frontend origins (preview, published, custom domain). Delete the A5 GoTrue verifier.
 
-**B5. Frontend swap — no visible change.** `src/integrations/backend/auth.ts` becomes the real implementation of the shim's `auth` surface: `signInWithPassword`, `signUp`, `signOut`, `getSession`, `onAuthStateChange`, `resetPasswordForEmail`, `updateUser`. `AuthBootstrap.tsx` calls it instead of Supabase; on boot it does a silent refresh against the cookie and dispatches `sessionLoaded`. `authSlice`, `useAuth()`, `ProtectedRoute`, `Login.tsx`, `Signup.tsx`, `ForgotPassword.tsx`, `ResetPassword.tsx`, `AuthPanel.tsx` — **unchanged**. Remember-me maps to a long-lived vs. session refresh cookie.
+## Contents of the specification
 
-**B6. Forced password reset.** Login with a null hash returns a "set your password" outcome that reuses the existing forgot-password flow and existing UI. Reset emails route through the current email infrastructure. 10 accounts today, so this is small — but it must be announced before cutover.
+1. **Product overview** — what Atulya Bharat Run is: virtual run/walk/ride challenges, milestone progress, clubs, leaderboard, blog, gallery, certificates/bibs.
+2. **Deployed architecture** — single Railway service: Express serves the built React bundle and the API under `/api/v1`; Postgres on Railway; Cloudflare R2 for files; Razorpay for payments; Strava for activity sync; SMTP for email.
+3. **Authentication contract** — custom auth (`/api/v1/auth/*`): register, login, logout, refresh, forgot/reset password, change password, `/me`, sessions/devices/login-history. Includes the **exact request and response shapes for both variants** of `/auth/login` and `/auth/refresh` (web cookie + CSRF vs mobile `X-Client-Type: mobile` with the refresh token in the body), rotation and reuse-detection semantics, token TTLs, secure-storage guidance, and error codes (401 invalid/reused token, 403 CSRF, 429 rate limit).
+4. **Roles and access** — `user`, `admin`, `super_admin`, how `/user-roles/me` drives gating, and which screens are admin-only (recommendation: keep admin web-only for v1).
+5. **Screen inventory** — every route in the published web app mapped to a proposed mobile screen, with data source per screen: home, challenges list/detail, checkout, my challenges, registration detail (progress map, milestones, certificate/bib), clubs list/detail/create, leaderboard, blog list/post, gallery, about/contact, legal pages, profile, security, notifications, auth screens.
+6. **API reference** — every mounted route group with method, path, auth requirement, request and response shape: auth, profiles, user-roles, challenges, registrations, milestones, activities, orders, coupons, blogs, pages, gallery, faqs, testimonials, notifications, clubs, newsletter, contact, storage, payments, strava, plus the generic `/tables/:table` PostgREST-style endpoint and `/rpc/:fn` allowlist (documented as internal compatibility surface the mobile app should avoid in favour of the domain routes).
+7. **Data model** — the 28 tables with key columns and relationships, and the domain types the mobile app should mirror (challenge, ticket, registration, milestone, club, order, profile, notification).
+8. **Business rules** — registration/checkout flow, coupon and club discounts, shipping cost, target days, distance accumulation from Strava vs manual entry, milestone unlocking, certificate eligibility, club approval states.
+9. **Integrations for mobile** — Razorpay mobile SDK vs the current web checkout flow, Strava OAuth redirect handling in a native app (deep link vs in-app browser), push notifications (not present today; what the backend would need).
+10. **Media and file handling** — R2 public URLs, upload endpoints, image size/MIME limits, bib/certificate generation location. Notes that some imported rows still reference Lovable Cloud storage URLs and must be rehosted on R2 before cutover.
+11. **Cutover status** — a short, factual section: Railway vs the currently-live custom domain, which tables hold real data on Railway, the outstanding forced password reset, and the DNS/env steps that make Railway production (`VITE_BACKEND_ENABLED=true`, domain repoint).
+12. **Environment and config** — which base URL the app points to, required env values, CORS implications for a native client.
+13. **Gaps and required backend work for mobile** — push notification infrastructure, Razorpay native SDK wiring, Strava deep-link callback, and any data still only reachable through the generic tables shim. (Token-transport for native is no longer a gap — Part 1 implements it.)
 
-**B7. Remove GoTrue.** Delete `@supabase/supabase-js` usage from auth paths, remove `src/integrations/supabase/client.ts`'s GoTrue client, drop the 14 Deno Edge Functions (already ported to Express), retire Supabase env vars. Single auth system, verifiably.
+## Technical approach
 
----
-
-## Stage C — IAM module in the admin panel
-
-Additive screen under `/admin`, built with the existing admin component patterns and styling so it looks native:
-
-- **Users** — list, search, activate/deactivate, force reset, unlock.
-- **Roles** — assign/revoke the five roles; fixes the current gap where no user holds `super_admin` and there's no UI to grant it.
-- **Sessions** — active sessions per user with device/IP/last-seen, revoke one or all.
-- **Audit & security logs** — auth events, role changes, lockouts, filterable.
-
-All gated by `requireRole("admin")`, which `super_admin` already satisfies.
-
----
-
-## Technical notes
-
-- `sanitizeResponse` stays global: `strava_tokens.*`, `payment_gateways.key_secret`, `password_hash` never leave the API.
-- Tokens: access ~15 min, refresh 30 days rotating.
-- Two origins in play (Lovable-hosted frontend, Railway API), so cookies require `SameSite=None; Secure` and an exact CORS allowlist — this is the most likely source of cutover friction.
-- New secrets: `DATABASE_URL`, `REDIS_URL`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `COOKIE_DOMAIN`, `CORS_ORIGINS`, R2 credentials, SMTP, plus existing Razorpay/Strava keys.
-- Tests: extend `security.middleware.test.ts` and `e2e-smoke.test.ts` to cover the policy engine per table, token rotation/reuse, lockout, and CSRF. `supertest` needs installing in the server workspace.
-
-## Risks
-
-- **Policy-port gaps (highest).** A missed RLS rule is a silent data-exposure hole, not a visible error. Mitigation: enumerate all 86 and assert each in tests before A7.
-- **Data migration integrity.** Mitigate with per-table row counts and FK checks, and keep Cloud read-only-available until Stage B passes.
-- **Cookie/CORS across origins.** Validate in staging on the real published domain, not just localhost.
-- **Every user must reset their password.** Unavoidable given the hashes are locked in Cloud; announce it.
-
-## Rough shape
-
-Stage A ~2.5–3 weeks (A4 alone is 8–12 days) · Stage B ~1–1.5 weeks · Stage C ~3–5 days.
-
-I'd build and verify Stage A end-to-end before starting Stage B — the exit gate is a real checkpoint, not a formality.
+Spec content is derived from the Railway server sources (`server/src/routes/*`, `server/src/services/*`, `server/src/models/sql/*`), the web app's routes and types (`src/App.tsx`, `src/services/*`, `src/types/*`), and then verified request-by-request against the redeployed live Railway API. The only code changes are the server-side auth-transport additions and tests in Part 1, plus any fixes Part 2's verification uncovers; web frontend behaviour is untouched.

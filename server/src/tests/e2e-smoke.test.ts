@@ -50,13 +50,18 @@ describe("Phase 8A.5 — route surface", () => {
   }
 
   const authRequired = [
-    ["POST", "/api/v1/auth/logout"],
     ["GET", "/api/v1/auth/me"],
     ["POST", "/api/v1/payments/razorpay/orders"],
     ["POST", "/api/v1/strava/connect"],
     ["POST", "/api/v1/registrations"],
     ["POST", "/api/v1/orders"],
   ] as const;
+
+    // Logout is intentionally idempotent: it succeeds (204) with no credential.
+  it("POST /api/v1/auth/logout is idempotent without auth (204)", async () => {
+    const res = await request(app).post("/api/v1/auth/logout").send({});
+    expect(res.status).toBe(204);
+  });
 
   for (const [method, path] of authRequired) {
     it(`${method} ${path} rejects without auth (401)`, async () => {

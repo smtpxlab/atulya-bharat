@@ -18,9 +18,9 @@ describe("auth routes — contract", () => {
     expect(r.status).toBe(400);
   });
 
-  it("requires refresh token on /refresh", async () => {
+  it("requires refresh token on /refresh (web: no cookie -> 401)", async () => {
     const r = await request(app).post("/api/v1/auth/refresh").send({});
-    expect(r.status).toBe(400);
+    expect(r.status).toBe(401);
   });
 
   it("requires auth on GET /me", async () => {

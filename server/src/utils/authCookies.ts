@@ -39,7 +39,24 @@ export function clearRefreshCookie(res: Response) {
 }
 
 export function readRefreshToken(req: Request): string | undefined {
-  // Cookie is canonical. Body fallback keeps native mobile clients (which have
-  // no cookie jar) working against the same endpoint.
+  // Native/mobile clients have no cookie jar: the body token is canonical for
+  // them. Browsers keep using the HTTP-only cookie.
+  if (isTokenTransportClient(req)) {
+    return (req.body?.refreshToken as string | undefined) ?? (req.cookies?.[REFRESH_COOKIE] as string | undefined);
+  }
   return (req.cookies?.[REFRESH_COOKIE] as string | undefined) ?? req.body?.refreshToken;
 }
+
+/**
+ * True when the client asked for "tokens in the JSON body" transport via
+ * `X-Client-Type: mobile` (or the legacy `native` value). Such clients get no
+ * refresh cookie and no CSRF cookie, and send the refresh token in the body.
+ */
+export const TOKEN_TRANSPORT_CLIENTS = new Set(["mobile", "native"]);
+
+export function isTokenTransportClient(req: Request): boolean {
+  const raw = req.headers["x-client-type"];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return typeof value === "string" && TOKEN_TRANSPORT_CLIENTS.has(value.trim().toLowerCase());
+}
+
