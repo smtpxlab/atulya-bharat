@@ -144,6 +144,10 @@ type RegContext = {
   window_start: string;
   window_end_ts: string;
   window_end_date: string;
+  /** YYYY-MM-DD of registered_at — earliest loggable date. */
+  reg_date: string;
+  /** YYYY-MM-DD of the full window end (not clamped to today). */
+  window_end_full: string;
   days_left: number;
 };
 
@@ -155,9 +159,11 @@ async function loadRegContext(
     `select r.id, r.user_id, r.challenge_id, r.status::text as status, r.registered_at,
             coalesce(r.activity_mode::text, 'any') as activity_mode,
             coalesce(c.distance, 0) as target,
-            ${WINDOW_START_SQL} as window_start,
+            to_char(${WINDOW_START_SQL}, 'YYYY-MM-DD') as window_start,
             ${WINDOW_END_SQL} as window_end_ts,
-            least((${WINDOW_END_SQL})::date, current_date) as window_end_date,
+            to_char(least((${WINDOW_END_SQL})::date, current_date), 'YYYY-MM-DD') as window_end_date,
+            to_char(r.registered_at::date, 'YYYY-MM-DD') as reg_date,
+            to_char(least((${WINDOW_END_SQL})::date, '9999-12-31'::date), 'YYYY-MM-DD') as window_end_full,
             least(9999, greatest(0, (${WINDOW_END_SQL})::date - current_date))::int as days_left
        from public.registrations r
        join public.challenges c on c.id = r.challenge_id
@@ -168,6 +174,7 @@ async function loadRegContext(
   if (!row) return null;
   return { ...row, target: num(row.target) } as RegContext;
 }
+
 
 /** Sum of in-window, mode-matching kilometres. Mirrors _registration_logged_km. */
 export async function registrationLoggedKm(
@@ -353,10 +360,11 @@ export async function logManualActivity(
         `A single activity cannot exceed the challenge target of ${ctx.target} km.`,
       );
 
-    const windowStart = String(ctx.registered_at).slice(0, 10);
-    const windowEnd = String(ctx.window_end_ts).slice(0, 10);
+    const windowStart = ctx.reg_date;
+    const windowEnd = ctx.window_end_full;
     if (input.activity_date < windowStart || input.activity_date > windowEnd)
       throw HttpError.badRequest(`Pick a date between ${windowStart} and ${windowEnd}.`);
+
 
     // Take the lock BEFORE the duplicate probe: two rapid retries of the same
     // submission must serialise here, otherwise both would see "no duplicate"

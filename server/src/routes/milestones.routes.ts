@@ -28,19 +28,24 @@ const milestoneInput = z.object({
   custom_label_position: z.string().nullable().optional(),
 });
 
+const milestoneListQuerySchema = listQuerySchema.extend({
+  challenge_id: z.string().uuid().optional(),
+});
+
 router.get(
   "/",
   optionalAuth,
-  validate(listQuerySchema, "query"),
+  validate(milestoneListQuerySchema, "query"),
   asyncHandler(async (req, res) => {
-    const { q, page, pageSize } = req.query as unknown as z.infer<typeof listQuerySchema>;
-    const challengeId = (req.query.challenge_id as string | undefined) ?? null;
+    const { q, page, pageSize, challenge_id: challengeId } =
+      req.query as unknown as z.infer<typeof milestoneListQuerySchema>;
     const qb = getDb()(TABLE).select("*").orderBy("sort_order", "asc").orderBy("distance", "asc");
     if (challengeId) qb.where({ challenge_id: challengeId });
     if (q) qb.andWhere((b) => b.whereILike("spot_name", `%${q}%`).orWhereILike("description", `%${q}%`));
     res.json(ok(await paginate(qb, page, pageSize)));
   }),
 );
+
 
 
 router.get(
