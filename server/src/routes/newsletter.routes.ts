@@ -6,6 +6,7 @@ import { requireRole } from "../middleware/requireRole";
 import { validate } from "../middleware/validate";
 import { asyncHandler } from "../utils/asyncHandler";
 import { listQuerySchema, paginate, ok } from "../utils/list";
+import { subscribeToNewsletter } from "../services/newsletter/newsletter.service";
 
 const TABLE = "newsletter_subscribers";
 const router = Router();
@@ -14,13 +15,10 @@ router.post(
   "/subscribe",
   validate(z.object({ email: z.string().email(), source: z.string().optional() })),
   asyncHandler(async (req, res) => {
-    const result = await getDb().raw("select * from public.subscribe_to_newsletter(?, ?)", [
-      req.body.email,
-      req.body.source ?? null,
-    ]);
-    res.json(ok((result.rows ?? result)[0] ?? { ok: true }));
+    res.json(ok(await subscribeToNewsletter(req.body.email, req.body.source ?? null)));
   }),
 );
+
 
 router.post(
   "/unsubscribe",

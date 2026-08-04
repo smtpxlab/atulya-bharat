@@ -7,6 +7,8 @@ import { validate } from "../middleware/validate";
 import { asyncHandler } from "../utils/asyncHandler";
 import { HttpError } from "../utils/httpError";
 import { listQuerySchema, paginate, ok } from "../utils/list";
+import { adminBookingStats } from "../services/admin/admin.service";
+
 
 const TABLE = "orders";
 const router = Router();
@@ -76,10 +78,11 @@ router.get(
   "/admin/stats",
   requireAuth,
   requireRole("admin"),
-  asyncHandler(async (_req, res) => {
-    const result = await getDb().raw("select * from public.admin_booking_stats()");
-    res.json(ok((result.rows ?? result)[0] ?? null));
+  asyncHandler(async (req, res) => {
+    const challengeId = typeof req.query.challenge_id === "string" ? req.query.challenge_id : null;
+    res.json(ok(await adminBookingStats(challengeId)));
   }),
 );
+
 
 export default router;

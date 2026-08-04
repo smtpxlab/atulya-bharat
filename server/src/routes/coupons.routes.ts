@@ -7,6 +7,8 @@ import { validate } from "../middleware/validate";
 import { asyncHandler } from "../utils/asyncHandler";
 import { HttpError } from "../utils/httpError";
 import { listQuerySchema, paginate, ok } from "../utils/list";
+import { validateCoupon } from "../services/coupons/coupon.service";
+
 
 const TABLE = "coupons";
 const router = Router();
@@ -27,13 +29,10 @@ router.post(
   requireAuth,
   validate(z.object({ code: z.string().min(1), amount: z.number().nonnegative() })),
   asyncHandler(async (req, res) => {
-    const result = await getDb().raw("select * from public.validate_coupon(?, ?)", [
-      req.body.code,
-      req.body.amount,
-    ]);
-    res.json(ok((result.rows ?? result)[0] ?? null));
+    res.json(ok(await validateCoupon(req.body.code, req.body.amount)));
   }),
 );
+
 
 // Admin CRUD
 router.get(

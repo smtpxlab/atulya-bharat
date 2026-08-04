@@ -10,11 +10,30 @@ import {
   challengeProgress,
   logManualActivity,
   progressByRegistration,
+  expireRegistrations,
+  registrationLoggedKm,
 } from "../services/challenges/progress.service";
 import {
   cancelActiveRegistration,
   registerForChallenge,
 } from "../services/challenges/registration.service";
+import { incrementCouponUsage, validateCoupon } from "../services/coupons/coupon.service";
+import { subscribeToNewsletter } from "../services/newsletter/newsletter.service";
+import {
+  canSeeClubMembers,
+  getPublicClubBySlug,
+  listClubMembers,
+  listPublicClubs,
+  recomputeClubMemberCount,
+} from "../services/clubs/clubs.service";
+import { globalLeaderboard, hallOfFame } from "../services/leaderboard/leaderboard.service";
+import {
+  adminBookingStats,
+  adminChallengeParticipantStats,
+  adminForceCompleteRegistration,
+  adminListChallengeParticipants,
+} from "../services/admin/admin.service";
+
 
 
 
@@ -43,6 +62,8 @@ const FUNCTIONS: Record<string, Access> = {
   challenge_progress_by_registration: "auth",
   cancel_active_registration: "auth",
   log_manual_activity: "auth",
+  expire_registrations: "auth",
+
   last_strava_sync_run: "auth",
   recent_strava_sync_runs: "auth",
   increment_coupon_usage: "auth",
@@ -56,76 +77,11 @@ const FUNCTIONS: Record<string, Access> = {
 
 const IDENT = /^[a-z0-9_]+$/i;
 
-const CLUB_PUBLIC_COLS = [
-  "id",
-  "slug",
-  "name",
-  "club_type",
-  "description",
-  "logo_url",
-  "banner_url",
-  "promoter_id",
-  "promoter_name",
-  "promoter_city",
-  "promoter_state",
-  "promoter_description",
-  "established_at",
-  "discount_challenge_percent",
-  "discount_cart_percent",
-  "social_links",
-  "tags",
-  "is_public",
-  "status",
-  "priority",
-  "member_count",
-  "category_id",
-  "created_by",
-  "created_at",
-  "updated_at",
-  "meta_title",
-  "meta_description",
-  "meta_keywords",
-];
-
-/** Knex fallbacks used when the Postgres function does not exist (42883). */
-const FALLBACKS: Record<string, (args: any) => Promise<unknown>> = {
-  list_public_clubs: async () =>
-    getDb()("clubs")
-      .select(CLUB_PUBLIC_COLS)
-      .where({ is_public: true, status: "approved" })
-      .orderBy("priority", "desc")
-      .orderBy("created_at", "desc"),
-
-  get_public_club_by_slug: async (args) =>
-    getDb()("clubs")
-      .select(CLUB_PUBLIC_COLS)
-      .where({ slug: String(args._slug ?? args.slug ?? "") })
-      .limit(1),
-
-  list_club_members: async (args) =>
-    getDb()("club_members as cm")
-      .leftJoin("profiles as p", "p.id", "cm.user_id")
-      .where("cm.club_id", String(args._club_id ?? args.club_id ?? ""))
-      .orderBy("cm.joined_at", "asc")
-      .select(
-        "cm.id as membership_id",
-        "cm.user_id",
-        "cm.role",
-        "cm.joined_at",
-        getDb().raw("(cm.role = 'owner') as is_owner"),
-        "p.full_name",
-        "p.avatar_url",
-        "p.city",
-        getDb().raw("0::int as activities_count"),
-        getDb().raw("coalesce(p.total_km_logged, 0) as total_distance_km"),
-        getDb().raw("coalesce(p.challenges_completed, 0) as challenges_completed"),
-      ),
-};
-
 /**
- * Native Express implementations (Priority 1). These bypass Postgres functions
- * entirely — identity comes from the authenticated request, never auth.uid().
+ * Native Express implementations. These bypass Postgres functions entirely —
+ * identity comes from the authenticated request, never auth.uid().
  */
+
 const NATIVE: Record<
   string,
   (args: any, userId: string | undefined, roles: string[] | undefined) => Promise<unknown>
@@ -190,10 +146,64 @@ const NATIVE: Record<
       (args._registration_id ?? args.registration_id ?? null) as string | null,
     );
   },
+  expire_registrations: async (_args, userId) => {
+    if (!userId) throw HttpError.unauthorized();
+    return expireRegistrations(userId);
+  },
 
+  // ---- Priority 2: coupons, newsletter, clubs, leaderboards, admin ----
+  validate_coupon: async (args, userId) => {
+    if (!userId) return { valid: false, reason: "auth_required" };
+    return validateCoupon(
+      String(args._code ?? args.code ?? ""),
+      Number(args._subtotal ?? args.subtotal ?? 0),
+    );
+  },
+  increment_coupon_usage: async (args, userId) => {
+    if (!userId) throw HttpError.unauthorized();
+    return incrementCouponUsage(String(args._code ?? args.code ?? ""));
+  },
+  subscribe_to_newsletter: async (args) =>
+    subscribeToNewsletter(
+      String(args._email ?? args.email ?? ""),
+      (args._source ?? args.source ?? null) as string | null,
+    ),
+
+  list_public_clubs: async () => listPublicClubs(),
+  get_public_club_by_slug: async (args) => {
+    const row = await getPublicClubBySlug(String(args._slug ?? args.slug ?? ""));
+    return row ? [row] : [];
+  },
+  list_club_members: async (args, userId, roles) => {
+    const clubId = String(args._club_id ?? args.club_id ?? "");
+    if (!clubId) throw HttpError.badRequest("club_id is required");
+    if (!(await canSeeClubMembers(clubId, userId, isAdmin(roles)))) return [];
+    return listClubMembers(clubId);
+  },
+  recompute_club_member_count: async (args) =>
+    recomputeClubMemberCount((args._club_id ?? args.club_id ?? null) as string | null),
+
+  global_leaderboard: async (args) =>
+    globalLeaderboard(
+      Math.min(Number(args._limit ?? args.limit ?? 20), 500),
+      Math.max(Number(args._offset ?? args.offset ?? 0), 0),
+    ),
+  hall_of_fame: async (args) => hallOfFame(Math.min(Number(args._limit ?? args.limit ?? 50), 500)),
+
+  admin_booking_stats: async (args) =>
+    adminBookingStats((args._challenge_id ?? args.challenge_id ?? null) as string | null),
+  admin_challenge_participant_stats: async (args) =>
+    adminChallengeParticipantStats(String(args._challenge_id ?? args.challenge_id ?? "")),
+  admin_list_challenge_participants: async (args) =>
+    adminListChallengeParticipants(String(args._challenge_id ?? args.challenge_id ?? ""), {
+      search: (args._search ?? args.search ?? null) as string | null,
+      status: (args._status ?? args.status ?? null) as string | null,
+      limit: Number(args._limit ?? args.limit ?? 50),
+      offset: Number(args._offset ?? args.offset ?? 0),
+    }),
+  admin_force_complete_registration: async (args) =>
+    adminForceCompleteRegistration(String(args._registration_id ?? args.registration_id ?? "")),
 };
-
-
 
 const router = Router();
 
@@ -216,33 +226,24 @@ router.post(
       return res.json(await native(args, req.user?.sub, req.user?.roles));
     }
 
+    // Remaining function-backed RPCs (e.g. Strava sync run readers) still hit
+    // Postgres with named arguments.
     const names = Object.keys(args).filter((k) => IDENT.test(k));
     const placeholders = names.map((n) => `${n} := ?`).join(", ");
     const values = names.map((n) => args[n] as never);
 
-
-    try {
-      const result = await getDb().raw(
-        `select * from public.${fn}(${placeholders})`,
-        values,
-      );
-      const rows = (result as any).rows ?? result;
-      // Scalar-returning functions come back as { fn: value } — unwrap them.
-      if (Array.isArray(rows) && rows.length === 1) {
-        const keys = Object.keys(rows[0] ?? {});
-        if (keys.length === 1 && keys[0] === fn) {
-          return res.json(rows[0][fn]);
-        }
+    const result = await getDb().raw(`select * from public.${fn}(${placeholders})`, values);
+    const rows = (result as any).rows ?? result;
+    // Scalar-returning functions come back as { fn: value } — unwrap them.
+    if (Array.isArray(rows) && rows.length === 1) {
+      const keys = Object.keys(rows[0] ?? {});
+      if (keys.length === 1 && keys[0] === fn) {
+        return res.json(rows[0][fn]);
       }
-      return res.json(rows);
-    } catch (err: any) {
-      const fallback = FALLBACKS[fn];
-      if (fallback && (err?.code === "42883" || err?.code === "42P01")) {
-        return res.json(await fallback(args));
-      }
-      throw err;
     }
+    return res.json(rows);
   }),
 );
+
 
 export default router;
