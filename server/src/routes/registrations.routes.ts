@@ -11,6 +11,11 @@ import {
   activeRegistration,
   progressByRegistration,
 } from "../services/challenges/progress.service";
+import {
+  cancelActiveRegistration,
+  registerForChallenge,
+} from "../services/challenges/registration.service";
+
 
 
 const TABLE = "registrations";
@@ -76,11 +81,14 @@ router.post(
   validate(registrationInput),
   asyncHandler(async (req, res) => {
     const { challenge_id, ticket_id, activity_mode, target_days } = req.body;
-    const result = await getDb().raw(
-      "select * from public.register_for_challenge(?, ?, ?, ?, ?)",
-      [req.user!.sub, challenge_id, ticket_id, activity_mode, target_days],
-    );
-    res.status(201).json(ok((result.rows ?? result)[0] ?? null));
+    const result = await registerForChallenge(req.user!.sub, {
+      challenge_id,
+      ticket_id,
+      activity_mode,
+      target_days,
+    });
+    if (!result.ok) throw HttpError.conflict(result.error, result);
+    res.status(201).json(ok(result));
   }),
 );
 
@@ -88,13 +96,12 @@ router.post(
   "/:id/cancel",
   requireAuth,
   asyncHandler(async (req, res) => {
-    await getDb().raw("select public.cancel_active_registration(?, ?)", [
-      req.user!.sub,
-      req.params.id,
-    ]);
-    res.json(ok({ id: req.params.id, cancelled: true }));
+    const result = await cancelActiveRegistration(req.user!.sub, req.params.id);
+    if (!result.ok) throw HttpError.badRequest(result.error);
+    res.json(ok({ id: result.registration_id, cancelled: true }));
   }),
 );
+
 
 // Admin
 router.get(

@@ -11,6 +11,11 @@ import {
   logManualActivity,
   progressByRegistration,
 } from "../services/challenges/progress.service";
+import {
+  cancelActiveRegistration,
+  registerForChallenge,
+} from "../services/challenges/registration.service";
+
 
 
 /**
@@ -167,6 +172,25 @@ const NATIVE: Record<
       notes: (args._notes ?? args.notes ?? null) as string | null,
     });
   },
+  register_for_challenge: async (args, userId) => {
+    if (!userId) throw HttpError.unauthorized();
+    // Identity always comes from the token; a supplied _user_id is ignored.
+    return registerForChallenge(userId, {
+      challenge_id: String(args._challenge_id ?? args.challenge_id ?? ""),
+      ticket_id: (args._ticket_id ?? args.ticket_id ?? null) as string | null,
+      activity_mode: (args._activity_mode ?? args.activity_mode ?? null) as string | null,
+      target_days:
+        args._target_days ?? args.target_days ? Number(args._target_days ?? args.target_days) : null,
+    });
+  },
+  cancel_active_registration: async (args, userId) => {
+    if (!userId) throw HttpError.unauthorized();
+    return cancelActiveRegistration(
+      userId,
+      (args._registration_id ?? args.registration_id ?? null) as string | null,
+    );
+  },
+
 };
 
 

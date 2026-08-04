@@ -358,6 +358,11 @@ export async function logManualActivity(
     if (input.activity_date < windowStart || input.activity_date > windowEnd)
       throw HttpError.badRequest(`Pick a date between ${windowStart} and ${windowEnd}.`);
 
+    // Take the lock BEFORE the duplicate probe: two rapid retries of the same
+    // submission must serialise here, otherwise both would see "no duplicate"
+    // and insert, double-counting the distance.
+    await trx.raw("select pg_advisory_xact_lock(hashtext(?))", [`strava-reg:${ctx.id}`]);
+
     const dup = await trx("activity_logs")
       .where({
         registration_id: ctx.id,
@@ -368,7 +373,6 @@ export async function logManualActivity(
       .first("id");
     if (dup) throw HttpError.badRequest("You already logged this exact distance for this date.");
 
-    await trx.raw("select pg_advisory_xact_lock(hashtext(?))", [`strava-reg:${ctx.id}`]);
 
     const [log] = await trx("activity_logs")
       .insert({

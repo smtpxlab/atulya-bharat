@@ -18,6 +18,7 @@ import { env } from "../../config/env";
 import { logger } from "../../config/logger";
 import { getDb } from "../../config/db";
 import { HttpError } from "../../utils/httpError";
+import { registerForChallenge } from "../challenges/registration.service";
 
 let client: Razorpay | null = null;
 
@@ -137,11 +138,12 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
   const finalPaise = Math.max(0, subtotalPaise - couponPaise);
 
   if (finalPaise === 0) {
-    const rpc = await db.raw<{ rows: { register_for_challenge: any }[] }>(
-      "select register_for_challenge(?, ?, ?, ?, ?) as register_for_challenge",
-      [userId, challengeId, ticketId, activityMode, targetDays],
-    );
-    const regResult = rpc.rows?.[0]?.register_for_challenge;
+    const regResult = await registerForChallenge(userId, {
+      challenge_id: challengeId,
+      ticket_id: ticketId,
+      activity_mode: activityMode,
+      target_days: targetDays,
+    });
     if (!regResult?.ok) {
       throw new HttpError(409, "ACTIVE_CHALLENGE_EXISTS", regResult?.challenge_name ?? "active", regResult);
     }
@@ -261,11 +263,12 @@ export async function verifyAndRecordPayment(input: VerifyPaymentInput) {
   const couponPaise = await computeCouponPaise(db, input.coupon_code ?? null, subtotalPaise);
   const finalPaise = Math.max(0, subtotalPaise - couponPaise);
 
-  const rpc = await db.raw<{ rows: { register_for_challenge: any }[] }>(
-    "select register_for_challenge(?, ?, ?, ?, ?) as register_for_challenge",
-    [userId, input.challenge_id, input.ticket_id, input.activity_mode ?? "any", input.target_days ?? null],
-  );
-  const regResult = rpc.rows?.[0]?.register_for_challenge;
+  const regResult = await registerForChallenge(userId, {
+    challenge_id: input.challenge_id,
+    ticket_id: input.ticket_id,
+    activity_mode: input.activity_mode ?? "any",
+    target_days: input.target_days ?? null,
+  });
   const mode = gatewayMode();
 
   if (!regResult?.ok) {
